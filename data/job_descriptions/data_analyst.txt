@@ -1,0 +1,1 @@
+Data Analyst: Required skills include Python, SQL, Pandas, data visualization, Excel, and communication. Preferred: Power BI, Tableau, and machine learning. Responsibilities include cleaning data, building dashboards, and presenting insights. Bachelor's degree in a quantitative discipline preferred.
