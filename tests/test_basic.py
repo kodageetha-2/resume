@@ -11,7 +11,7 @@ from src.job_parser import parse_job_description
 from src.similarity import analyze_match
 from src.embeddings import semantic_similarity
 from src.evaluation import prompt_comparison
-from src.interview import fallback_mcqs, parse_mcqs
+from src.interview import MIN_MOCK_QUESTIONS, fallback_mcqs, parse_mcqs
 from src.rag import retrieve
 from src.prompts import enforce_blueprint_resume_keywords
 from src import llm
@@ -73,12 +73,20 @@ Sales dashboard using Python, SQL, and Pandas""")
 
     def test_fallback_mcqs_use_resume_skills_and_have_four_options(self):
         questions = fallback_mcqs(self.resume, self.job)
-        self.assertEqual(len(questions), 5)
+        self.assertGreaterEqual(len(questions), MIN_MOCK_QUESTIONS)
         self.assertIn("python", {question["topic"] for question in questions})
+        self.assertTrue(any("Python" in question["question"] or "python" in question["question"].lower() for question in questions))
         for question in questions:
             self.assertEqual(set(question["options"]), {"A", "B", "C", "D"})
             self.assertIn(question["correct_answer"], question["options"])
             self.assertTrue(question["explanation"])
+
+    def test_fallback_mcqs_reach_ten_for_a_short_resume(self):
+        short_resume = parse_resume("Asha\nProject: Built a sales dashboard.")
+        questions = fallback_mcqs(short_resume, {"required_skills": []})
+        self.assertGreaterEqual(len(questions), MIN_MOCK_QUESTIONS)
+        self.assertTrue(all(question["question"] for question in questions))
+        self.assertTrue(any("sales dashboard" in question["question"].lower() for question in questions))
 
     def test_mcq_parser_rejects_malformed_and_varies_correct_answers(self):
         fallback = fallback_mcqs(self.resume, self.job)
@@ -255,6 +263,6 @@ Sales dashboard using Python, SQL, and Pandas""")
             app.run(timeout=60)
             next(button for button in app.button if button.label == "Generate resume-based question set").click().run(timeout=60)
         questions = app.session_state["mock_questions"]
-        self.assertEqual(len(questions), 5)
+        self.assertGreaterEqual(len(questions), MIN_MOCK_QUESTIONS)
         self.assertTrue(app.session_state["mock_questions_mixed"])
         self.assertFalse(app.exception)

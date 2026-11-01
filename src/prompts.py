@@ -16,7 +16,7 @@ Target job: {job.get('raw_text', '')}
 Missing job skills (learning topics, not existing skills): {', '.join(missing)}"""
 
 def mock_interview_prompt(resume, job):
-    return f"""Create five unique resume-based interview multiple-choice questions as valid JSON only, with no Markdown fences. Use this exact shape: {{"questions":[{{"question":"...","topic":"...","options":{{"A":"...","B":"...","C":"...","D":"..."}},"correct_answer":"A","explanation":"..."}}]}}.
+    return f"""Create at least 10 unique resume-based interview multiple-choice questions as valid JSON only, with no Markdown fences. Use this exact shape: {{"questions":[{{"question":"...","topic":"...","options":{{"A":"...","B":"...","C":"...","D":"..."}},"correct_answer":"A","explanation":"..."}}]}}.
 Each question must be based on a skill, project, education, or experience explicitly present in the resume. Use job skills only when they are explicitly required by the target job. Give exactly four distinct options and exactly one correct answer letter (A-D), with a brief factual explanation. Vary correct-answer letters. Avoid duplicate questions and unsupported candidate claims.
 Resume: {resume.get('raw_text', '')}
 Resume skills: {', '.join(resume.get('technical_skills', []))}

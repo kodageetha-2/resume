@@ -10,7 +10,7 @@ from src.similarity import analyze_match
 from src.llm import generate
 from src.prompts import resume_improvement_prompt, interview_prompt, mock_interview_prompt, career_blueprint_prompt, enforce_blueprint_resume_keywords
 from src.roadmap import make_roadmap
-from src.interview import fallback_questions, fallback_mcqs, parse_mcqs
+from src.interview import MIN_MOCK_QUESTIONS, fallback_questions, fallback_mcqs, parse_mcqs
 from src.rag import retrieve
 from src.evaluation import prompt_comparison
 
@@ -341,7 +341,7 @@ elif page == "Mock Interview":
         if not resume.get("raw_text", "").strip():
             st.warning("Add readable resume text before starting a resume-based mock interview.")
         elif "mock_questions" not in st.session_state:
-            st.markdown("<div class='section-head'><div><div class='eyebrow'>MOCK INTERVIEW / MULTIPLE CHOICE</div><h2>Questions from your profile</h2></div><div class='mono'>UP TO 5 QUESTIONS</div></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='section-head'><div><div class='eyebrow'>MOCK INTERVIEW / MULTIPLE CHOICE</div><h2>Questions from your profile</h2></div><div class='mono'>AT LEAST {MIN_MOCK_QUESTIONS} QUESTIONS</div></div>", unsafe_allow_html=True)
             st.caption("The questions use skills, projects, and experience found in your resume, with the target job as secondary context.")
             if st.button("Generate resume-based question set", type="primary"):
                 fallback=fallback_mcqs(resume, job)
@@ -351,9 +351,10 @@ elif page == "Mock Interview":
                     try:
                         with st.spinner("Generating and validating your MCQs…"):
                             fallback_json=json.dumps({"questions":fallback}, ensure_ascii=False)
-                            response, live=generate(mock_interview_prompt(resume, job), fallback_json, max_tokens=750)
+                            response, live=generate(mock_interview_prompt(resume, job), fallback_json, max_tokens=1600)
                             allowed_topics=list(resume.get("technical_skills", [])) + list(job.get("required_skills", []))
                             allowed_topics.extend(section.title() for section in ("education", "experience", "projects", "internships") if resume.get(section))
+                            allowed_topics.append("Resume profile")
                             questions, valid=parse_mcqs(response, fallback, allowed_topics)
                             model_question_count=len(questions) if live and valid else 0
                             existing={question["question"].casefold() for question in questions}
@@ -362,7 +363,7 @@ elif page == "Mock Interview":
                                     if item["question"].casefold() not in existing:
                                         questions.append(item)
                                         existing.add(item["question"].casefold())
-                                    if len(questions) >= 5:
+                                    if len(questions) >= MIN_MOCK_QUESTIONS:
                                         break
                         if not questions:
                             raise ValueError("No valid questions could be created from this resume.")

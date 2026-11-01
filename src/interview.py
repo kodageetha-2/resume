@@ -34,6 +34,7 @@ _SKILL_QUESTIONS = {
   }
 
 _ANSWER_CYCLE = ("A", "C", "B", "D")
+MIN_MOCK_QUESTIONS = 10
 
 def _place_correct_option(question, correct_text, distractors, explanation, index, topic):
     options=[correct_text, *distractors[:3]]
@@ -45,11 +46,13 @@ def _place_correct_option(question, correct_text, distractors, explanation, inde
     return {"question":question, "topic":topic, "options":options_by_label,
           "correct_answer":answer, "explanation":explanation}
 
-def fallback_mcqs(resume, job=None, count=5):
+def fallback_mcqs(resume, job=None, count=MIN_MOCK_QUESTIONS):
     skills=list(dict.fromkeys(resume.get("technical_skills", [])))
     required=(job or {}).get("required_skills", [])
     skills.extend(skill for skill in required if skill not in skills)
     profile_text=(resume.get("raw_text") or "").strip()
+    profile_lines=[line.strip() for line in profile_text.splitlines()
+                   if line.strip() and line.strip().casefold() != str(resume.get("name", "")).strip().casefold()]
     if not profile_text:
       return []
     questions=[]
@@ -84,9 +87,36 @@ def fallback_mcqs(resume, job=None, count=5):
       explanation=f"A concrete example of using {skill} connects the resume claim to verifiable evidence."
       questions.append(_place_correct_option(question, correct, distractors, explanation, len(questions), skill))
     if not questions:
-      anchor=next((line.strip() for line in profile_text.splitlines() if line.strip()), "the profile details provided")[:100]
+      anchor=(profile_lines[0] if profile_lines else "the profile details provided")[:100]
       question=f"Which interview response best supports the resume detail: {anchor}?"
       questions.append(_place_correct_option(question, "Give a concrete example that explains your own action and its result.", ["State an unsupported achievement.", "Repeat the detail without context.", "Describe a skill absent from the resume."], "A concrete example provides support for the resume claim without adding new facts.", 0, "Resume evidence"))
+    evidence=[]
+    evidence.extend((skill, skill) for skill in skills)
+    evidence.extend((label.title(), (resume.get(section) or "").strip().splitlines()[0][:100])
+                    for section, label in resume_sections)
+    evidence.extend(("Resume profile", line[:100]) for line in profile_lines)
+    follow_ups=[
+      ("Which response best explains your contribution to {detail}?", "Describe your own actions and separate them from the team's work.", ["Claim ownership of the entire team's work.", "Add an achievement not present in your resume.", "Repeat the detail without explaining your role."], "Clear ownership keeps the answer grounded in the supplied resume."),
+      ("When discussing {detail}, which evidence should you include?", "A specific example and an outcome you can verify.", ["An estimated metric presented as fact.", "A result without explaining how it was achieved.", "A responsibility not listed in your resume."], "Verifiable evidence makes the resume detail credible."),
+      ("What is the strongest way to expand on {detail} in an interview?", "Explain the context, your action, and what you learned.", ["Add unrelated experience to make the answer longer.", "Describe only what others did.", "Invent a result that sounds impressive."], "Context, personal action, and learning give a truthful, complete answer."),
+      ("If asked about {detail}, how should you support your answer?", "Use a concrete example from the experience in your resume.", ["Claim expertise beyond the evidence provided.", "Give a hypothetical result as if it happened.", "Avoid describing your own contribution."], "A concrete resume-based example avoids unsupported claims."),
+      ("Which follow-up would make your explanation of {detail} clearest?", "Name the steps you personally took and the evidence of the outcome.", ["Use a number you cannot verify.", "Focus only on the team's general responsibilities.", "Add a tool or skill absent from your profile."], "Specific actions and verifiable outcomes clarify the candidate's role."),
+      ("What should you emphasize when presenting {detail}?", "The problem or goal, your contribution, and a truthful result.", ["A result with no supporting example.", "An achievement from someone else's work.", "A skill you have not used."], "This structure communicates impact without adding unsupported facts."),
+      ("How can you answer a follow-up about {detail} accurately?", "Stay within the supplied experience and explain what you know firsthand.", ["Guess at details you do not remember.", "Present an assumption as a measured result.", "Claim work that is not yours."], "Firsthand, evidence-based details preserve accuracy."),
+      ("Which answer best reflects learning from {detail}?", "Describe a lesson supported by the experience and how you would apply it.", ["Claim a lesson unrelated to the experience.", "Invent a challenge that is not in the profile.", "Avoid explaining what you learned."], "A relevant lesson connects the experience to future work without inventing facts."),
+      ("What is the most credible way to discuss {detail}?", "Be precise about your role and use only outcomes you can substantiate.", ["Overstate your responsibility.", "Add an unverified percentage.", "Describe an outcome without evidence."], "Precise ownership and substantiated outcomes are credible."),
+      ("How should you respond if asked for more detail about {detail}?", "Give a specific, truthful example and clarify any limits in your experience.", ["Claim experience you do not have.", "Use vague claims instead of examples.", "Turn an estimate into a confirmed fact."], "A specific answer that acknowledges limits stays truthful."),
+    ]
+    for template_index, template in enumerate(follow_ups):
+      for topic, anchor in evidence:
+        question_template, correct, distractors, explanation=template
+        question=question_template.format(detail=anchor)
+        if question.casefold() in {item["question"].casefold() for item in questions}:
+          continue
+        questions.append(_place_correct_option(question, correct, distractors, explanation, len(questions), topic))
+        break
+      if len(questions) >= count:
+        break
     return questions[:count]
 
 def parse_mcqs(response, fallback, allowed_topics=None):
@@ -141,4 +171,4 @@ def parse_mcqs(response, fallback, allowed_topics=None):
       answer=item["correct_answer"]
       item["options"][answer], item["options"][target]=item["options"][target], item["options"][answer]
       item["correct_answer"]=target
-    return valid[:5], True
+    return valid[:MIN_MOCK_QUESTIONS], True
