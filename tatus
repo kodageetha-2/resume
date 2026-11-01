@@ -1,0 +1,1278 @@
+warning: in the working copy of '.env.example', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/embeddings.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/evaluation.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/interview.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/job_parser.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/llm.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/prompts.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/rag.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/test_basic.py', LF will be replaced by CRLF the next time Git touches it
+[1mdiff --git a/.env.example b/.env.example[m
+[1mindex a896253..68da32b 100644[m
+[1m--- a/.env.example[m
+[1m+++ b/.env.example[m
+[36m@@ -1,3 +1,4 @@[m
+[31m-# Optional: enables generative recommendations. Leave unset to use deterministic offline guidance.[m
+[31m-OPENAI_API_KEY=your_api_key_here[m
+[31m-OPENAI_MODEL=gpt-4o-mini[m
+[32m+[m[32m# Ollama runs the downloaded open-weight model locally.[m
+[32m+[m[32mOLLAMA_BASE_URL=http://localhost:11434/v1[m
+[32m+[m[32mOLLAMA_MODEL=qwen2.5:3b[m
+[32m+[m[32mOLLAMA_KEEP_ALIVE=30m[m
+[1mdiff --git a/README.md b/README.md[m
+[1mindex 2bae5fb..85a6951 100644[m
+[1m--- a/README.md[m
+[1m+++ b/README.md[m
+[36m@@ -1,6 +1,6 @@[m
+ # AI-Powered Generative Career Assistant[m
+ [m
+[31m-A modular Streamlit academic project for resume–job matching, skill gaps, RAG career guidance and placement preparation. It uses sentence-transformer embeddings when available, with a TF-IDF fallback, and optional OpenAI-compatible LLM recommendations.[m
+[32m+[m[32mA modular Streamlit academic project for resume–job matching, skill gaps, RAG career guidance and placement preparation. It uses sentence-transformer embeddings when available, with a TF-IDF fallback, and runs the open-weight Qwen 2.5 3B model locally through Ollama for generated recommendations.[m
+ [m
+ ## Install and run[m
+ [m
+[36m@@ -9,10 +9,11 @@[m [mpython -m venv .venv[m
+ .venv\\Scripts\\activate[m
+ pip install -r requirements.txt[m
+ copy .env.example .env[m
+[32m+[m[32mollama pull qwen2.5:3b[m
+ streamlit run app.py[m
+ ```[m
+ [m
+[31m-Add `OPENAI_API_KEY` and optionally `OPENAI_MODEL` to `.env`; never commit `.env`. The application remains usable without a key through deterministic offline guidance.[m
+[32m+[m[32mInstall Ollama before running the app, then download the model with `ollama pull qwen2.5:3b`. Ollama must be running locally; the app connects to its OpenAI-compatible endpoint at `http://localhost:11434/v1`. Set `OLLAMA_MODEL` or `OLLAMA_BASE_URL` in `.env` to use a different local model or endpoint. `OLLAMA_KEEP_ALIVE` controls how long Ollama keeps the model loaded after each request (default `30m`, using about 2.2 GB for Qwen 2.5 3B on this machine). If Ollama is unavailable, the application remains usable with deterministic offline guidance.[m
+ [m
+ ## Test[m
+ [m
+[1mdiff --git a/app.py b/app.py[m
+[1mindex 1e65e9a..d82088f 100644[m
+[1m--- a/app.py[m
+[1m+++ b/app.py[m
+[36m@@ -1,3 +1,6 @@[m
+[32m+[m[32mimport html[m
+[32m+[m[32mimport json[m
+[32m+[m[32mimport logging[m
+ import streamlit as st[m
+ import pandas as pd[m
+ import plotly.express as px[m
+[36m@@ -5,61 +8,113 @@[m [mfrom src.resume_parser import pdf_to_text, parse_resume[m
+ from src.job_parser import parse_job_description[m
+ from src.similarity import analyze_match[m
+ from src.llm import generate[m
+[31m-from src.prompts import resume_improvement_prompt, interview_prompt, career_blueprint_prompt[m
+[32m+[m[32mfrom src.prompts import resume_improvement_prompt, interview_prompt, mock_interview_prompt, career_blueprint_prompt, enforce_blueprint_resume_keywords[m
+ from src.roadmap import make_roadmap[m
+[31m-from src.interview import fallback_questions, evaluate_answer[m
+[32m+[m[32mfrom src.interview import fallback_questions, fallback_mcqs, parse_mcqs[m
+ from src.rag import retrieve[m
+ from src.evaluation import prompt_comparison[m
+ [m
+[31m-st.set_page_config(page_title="Generative Career Assistant", page_icon="🎯", layout="wide")[m
+[32m+[m[32mlogger = logging.getLogger(__name__)[m
+[32m+[m
+[32m+[m[32mst.set_page_config(page_title="Career Foundry | Local Career Lab", page_icon="✳", layout="wide")[m
+ st.markdown("""<style>[m
+[31m- .stApp {background:#fff; color:#161616; font-family:Arial, sans-serif;}[m
+[31m- [data-testid="stHeader"] {background:rgba(255,255,255,.96);}[m
+[31m- .block-container {max-width:1250px; padding-top:1.2rem;}[m
+[31m- [data-testid="stMetric"] {background:#fff; border:1px solid #e7e7e7; border-radius:8px; padding:14px; box-shadow:none;}[m
+[31m- .topline {border-bottom:1px solid #eee; padding-bottom:10px; margin-bottom:8px;}[m
+[31m- .hero-copy {padding:64px 5px 25px 55px;}[m
+[31m- .hero-copy h1 {font-size:4.1rem; line-height:1.03; letter-spacing:-.19rem; margin:0 0 25px; font-weight:800; color:#050505;}[m
+[31m- .hero-copy p {font-size:1.25rem; line-height:1.6; max-width:580px; color:#363636;}[m
+[31m- .resume-card {background:#fff; width:365px; min-height:465px; padding:27px 26px; margin:32px auto; border-top:13px solid #365cf5; box-shadow:0 12px 28px rgba(0,0,0,.18); color:#252525; font-family:Arial,sans-serif;}[m
+[31m- .resume-name {font-weight:800; color:#365cf5; font-size:1.22rem; margin:9px 0 16px;}[m
+[31m- .resume-rule {height:3px; background:#365cf5; margin:16px 0 7px;}[m
+[31m- .resume-label {font-size:.55rem; font-weight:800; color:#365cf5; letter-spacing:.08em;}[m
+[31m- .resume-lines {font-size:.57rem; line-height:1.45; color:#555;}[m
+[31m- .trust {display:inline-block; background:#f3f5ff; padding:11px 18px; border-radius:7px; font-weight:600; margin:12px 0;}[m
+[31m- .green {color:#00a878; font-weight:800;}[m
+[31m- .stButton>button {border-radius:27px; font-size:1rem; font-weight:700; min-height:3.7rem; padding:0 30px;}[m
+[31m- .stButton>button[kind="primary"] {background:#123b6d; border-color:#123b6d; color:#fff;}[m
+[31m- .stButton>button[kind="secondary"] {background:#f0f1f3; border-color:#f0f1f3; color:#262626;}[m
+[31m- [data-testid="stFileUploader"] {background:#f7f8fb; border:1px dashed #aeb8cc; border-radius:10px; padding:10px 14px;}[m
+[31m- [data-testid="stFileUploader"] button {background:#ffffff !important; border:1px solid #365cf5 !important; color:#2447c8 !important; font-weight:700 !important;}[m
+[31m- [data-testid="stFileUploader"] button * {color:#2447c8 !important;}[m
+[31m- [data-testid="stFileUploader"] small, [data-testid="stFileUploader"] span {color:#424b5b !important;}[m
+[31m- textarea {background:#17233a !important; color:#ffffff !important; caret-color:#ffffff !important; border:1px solid #35527e !important;}[m
+[31m- textarea::placeholder {color:#c2cbda !important; opacity:1;}[m
+[31m- .helper {background:#f6f8fc; border:1px solid #e2e7f1; border-radius:10px; padding:18px 20px; margin:12px 0 20px; color:#394150;}[m
+[31m- .helper b {color:#1c2848;}[m
+[31m- .form-title {font-size:2rem; font-weight:800; letter-spacing:-.07rem; margin:18px 0 4px;}[m
+[31m- .nav-button .stButton>button {min-height:2.5rem; font-size:.83rem; border-radius:6px; padding:0 12px;}[m
+[31m- @media(max-width:850px) {.hero-copy {padding:25px 10px;}.hero-copy h1{font-size:2.75rem;}.resume-card{width:82%;}}[m
+[31m- </style>""", unsafe_allow_html=True)[m
+[31m-st.markdown("<div class='topline'></div>", unsafe_allow_html=True)[m
+[32m+[m[32m@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap');[m
+[32m+[m[32m:root {--ink:#17332f; --paper:#f3f6f0; --line:#d7dfd7; --lime:#d9f36a; --coral:#ff725c; --muted:#64736c;}[m
+[32m+[m[32m.stApp {background-color:var(--paper); color:var(--ink); font-family:'Manrope',sans-serif;}[m
+[32m+[m[32m.stApp:before {content:''; position:fixed; inset:0; pointer-events:none; z-index:0; opacity:.2; background-image:radial-gradient(#9eafa4 .7px,transparent .7px); background-size:18px 18px;}[m
+[32m+[m[32m[data-testid="stHeader"] {background:transparent;}[m
+[32m+[m[32m.block-container {max-width:1320px; padding:1.1rem 2rem 4rem; position:relative;}[m
+[32m+[m[32m[data-testid="stSidebar"] {background:var(--ink); border-right:1px solid #31534c;}[m
+[32m+[m[32m[data-testid="stSidebar"] * {color:#f1f5ed;}[m
+[32m+[m[32m[data-testid="stSidebar"] [data-testid="stRadio"] label {font-size:.9rem;}[m
+[32m+[m[32m[data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] {gap:.12rem;}[m
+[32m+[m[32m[data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked) {color:var(--lime); font-weight:800;}[m
+[32m+[m[32m[data-testid="stSidebar"] hr {border-color:#426158;}[m
+[32m+[m[32m.brand {display:flex; align-items:center; gap:11px; padding:8px 0 24px; border-bottom:1px solid #426158; margin-bottom:18px;}[m
+[32m+[m[32m.brand-icon {display:grid; place-items:center; width:36px; height:36px; background:var(--lime); color:var(--ink); font-size:1.25rem; font-weight:800;}[m
+[32m+[m[32m.brand-name {font-size:.98rem; font-weight:800; line-height:1.12;}[m
+[32m+[m[32m.brand-sub {font-family:'DM Mono',monospace; color:#b8c8bd; font-size:.6rem; letter-spacing:.08em; margin-top:3px;}[m
+[32m+[m[32m[data-testid="stMetric"] {background:#fff; border:1px solid var(--line); border-bottom:3px solid var(--lime); border-radius:4px; padding:14px 16px;}[m
+[32m+[m[32m[data-testid="stMetricLabel"] {color:var(--muted); font-family:'DM Mono',monospace; text-transform:uppercase; font-size:.68rem;}[m
+[32m+[m[32m[data-testid="stMetricValue"] {color:var(--ink); font-weight:800;}[m
+[32m+[m[32m.masthead {display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--line); padding:4px 0 12px; margin-bottom:30px;}[m
+[32m+[m[32m.masthead-word {font-weight:800; font-size:.95rem; letter-spacing:.02em;}[m
+[32m+[m[32m.masthead-meta,.eyebrow,.mono {font-family:'DM Mono',monospace; font-size:.68rem; letter-spacing:.04em; text-transform:uppercase;}[m
+[32m+[m[32m.masthead-meta {color:var(--muted);}[m
+[32m+[m[32m.hero-copy {padding:26px 12px 30px 0;}[m
+[32m+[m[32m.hero-copy h1 {font-size:3.65rem; line-height:1.04; letter-spacing:0; margin:13px 0 18px; font-weight:800; color:var(--ink); max-width:700px;}[m
+[32m+[m[32m.hero-copy p {font-size:1.04rem; line-height:1.65; max-width:600px; color:#43544d;}[m
+[32m+[m[32m.eyebrow {color:#55746a; font-weight:500;}[m
+[32m+[m[32m.hero-panel {background:var(--ink); color:#f1f5ed; min-height:280px; padding:24px; margin:22px 0; border-radius:4px; position:relative; overflow:hidden;}[m
+[32m+[m[32m.hero-panel .eyebrow {color:var(--lime);}[m
+[32m+[m[32m.hero-panel h3 {font-size:1.3rem; color:#fff; margin:12px 0 18px;}[m
+[32m+[m[32m.flow-step {display:flex; gap:14px; border-top:1px solid #426158; padding:12px 0; align-items:center;}[m
+[32m+[m[32m.flow-num {font-family:'DM Mono',monospace; color:var(--lime); font-size:.72rem;}[m
+[32m+[m[32m.flow-copy {font-size:.86rem; color:#e1e9e2;}[m
+[32m+[m[32m.flow-copy small {display:block; color:#aebfb4; margin-top:2px;}[m
+[32m+[m[32m.helper {background:#fff; border-left:4px solid var(--coral); padding:15px 18px; margin:10px 0 18px; color:#405149;}[m
+[32m+[m[32m.helper b {color:var(--ink);}[m
+[32m+[m[32m.form-title {font-size:1.45rem; font-weight:800; margin:22px 0 3px; color:var(--ink);}[m
+[32m+[m[32m.section-head {display:flex; justify-content:space-between; align-items:flex-end; border-bottom:1px solid var(--line); padding:0 0 13px; margin:18px 0 22px;}[m
+[32m+[m[32m.section-head h2 {font-size:1.7rem; line-height:1.15; margin:5px 0 0; color:var(--ink);}[m
+[32m+[m[32m.studio-note {background:#e8efdf; border:1px solid #d4dfca; padding:12px 15px; border-radius:4px; color:#43544d; font-size:.9rem;}[m
+[32m+[m[32m.stButton>button {border-radius:4px; min-height:2.8rem; font-weight:800; transition:transform .15s ease, filter .15s ease;}[m
+[32m+[m[32m.stButton>button:hover {transform:translateY(-1px); filter:brightness(.97);}[m
+[32m+[m[32m.stButton>button[kind="primary"] {background:var(--lime); border-color:var(--lime); color:var(--ink);}[m
+[32m+[m[32m.stButton>button[kind="secondary"] {background:#fff; border-color:#bdcac0; color:#000 !important;}[m
+[32m+[m[32m.stButton>button[kind="secondary"] * {color:#000 !important;}[m
+[32m+[m[32m[data-testid="stFileUploader"] {background:#fff; border:1px dashed #9eafa4; border-radius:4px; padding:9px 12px;}[m
+[32m+[m[32m[data-testid="stFileUploader"] button {background:var(--ink) !important; border:1px solid var(--ink) !important; color:#fff !important; border-radius:3px !important; font-weight:700 !important;}[m
+[32m+[m[32m[data-testid="stFileUploader"] button * {color:#fff !important;}[m
+[32m+[m[32m[data-testid="stFileUploader"] small,[data-testid="stFileUploader"] span {color:#43544d !important;}[m
+[32m+[m[32mtextarea,[data-testid="stTextInput"] input {background:#fff !important; color:var(--ink) !important; caret-color:var(--ink) !important; border:1px solid #bdcac0 !important; border-radius:4px !important;}[m
+[32m+[m[32mtextarea::placeholder {color:#77867e !important; opacity:1;}[m
+[32m+[m[32m[data-testid="stMain"] [data-testid="stRadio"] [role="radiogroup"] > label {background:#fff !important; color:#000 !important; border:1px solid #bdcac0; border-radius:4px; padding:10px 14px; margin:6px 0; transition:background .15s ease,border-color .15s ease;}[m
+[32m+[m[32m[data-testid="stMain"] [data-testid="stRadio"] [role="radiogroup"] > label * {color:#000 !important;}[m
+[32m+[m[32m[data-testid="stMain"] [data-testid="stRadio"] [role="radiogroup"] > label:hover {background:#e8efdf !important; border-color:#55746a;}[m
+[32m+[m[32m[data-testid="stMain"] [data-testid="stRadio"] [role="radiogroup"] > label:has(input:checked) {background:var(--lime) !important; border-color:#819d25;}[m
+[32m+[m[32m[data-testid="stMain"] [data-testid="stRadio"] [role="radiogroup"] > label:has(input:focus-visible) {outline:3px solid var(--coral); outline-offset:2px;}[m
+[32m+[m[32m[data-testid="stExpander"] {background:#fff !important; color:var(--ink) !important; border:1px solid var(--line); border-radius:4px; position:relative; z-index:1; overflow:visible;}[m
+[32m+[m[32m[data-testid="stExpander"] summary,[data-testid="stExpander"] [data-testid="stExpanderDetails"] {background:#fff !important; color:var(--ink) !important;}[m
+[32m+[m[32m[data-testid="stExpander"] [data-testid="stExpanderDetails"] p,[data-testid="stExpander"] [data-testid="stExpanderDetails"] li,[data-testid="stExpander"] [data-testid="stExpanderDetails"] span {color:var(--ink) !important;}[m
+[32m+[m[32m.match-warning {background:#fff0a8; color:#241f0b; border:1px solid #d7bc44; border-left:4px solid #b28c00; padding:14px 17px; margin:14px 0; border-radius:4px; line-height:1.55;}[m
+[32m+[m[32m.match-warning * {color:#241f0b !important;}[m
+[32m+[m[32m@media(max-width:850px) {.block-container{padding:1rem 1rem 3rem;}.hero-copy{padding:14px 0;}.hero-copy h1{font-size:2.55rem;}.hero-panel{min-height:unset;margin:8px 0 20px;}.masthead{margin-bottom:18px;}}[m
+[32m+[m[32m</style>""", unsafe_allow_html=True)[m
+ [m
+ def ready(): return "resume" in st.session_state and "job" in st.session_state[m
+ def load_resume(upload):[m
+[31m-    st.session_state.resume = parse_resume(pdf_to_text(upload))[m
+[32m+[m[32m    text=pdf_to_text(upload)[m
+[32m+[m[32m    if not text.strip():[m
+[32m+[m[32m        raise ValueError("No readable text was found in this PDF. Try a text-based resume PDF.")[m
+[32m+[m[32m    st.session_state.resume = parse_resume(text)[m
+ def load_job(text, upload):[m
+[31m-    if upload: text = pdf_to_text(upload) if upload.name.lower().endswith(".pdf") else upload.getvalue().decode("utf-8", errors="replace")[m
+[32m+[m[32m    if upload:[m
+[32m+[m[32m        text = pdf_to_text(upload) if upload.name.lower().endswith(".pdf") else upload.getvalue().decode("utf-8", errors="replace")[m
+     st.session_state.job = parse_job_description(text)[m
+ def need_data():[m
+[31m-    if not ready(): st.info("First add a resume and job description on the **Home** page."); return True[m
+[32m+[m[32m    if not ready():[m
+[32m+[m[32m        st.info("First add a resume and job description on the **Home** page.")[m
+[32m+[m[32m        return True[m
+     return False[m
+ [m
+[32m+[m[32mdef reset_workspace():[m
+[32m+[m[32m    st.session_state.clear()[m
+[32m+[m
+ def intake_form():[m
+     """One friendly entry point for the documents used across the app."""[m
+[32m+[m[32m    if ready():[m
+[32m+[m[32m        match=analyze_match(st.session_state.resume, st.session_state.job)[m
+[32m+[m[32m        st.markdown("<div class='section-head'><div><div class='eyebrow'>WORKSPACE READY</div><h2>Your career signal snapshot</h2></div><div class='mono'>01 / OVERVIEW</div></div>", unsafe_allow_html=True)[m
+[32m+[m[32m        first, second, third=st.columns(3)[m
+[32m+[m[32m        first.metric("Role match", f"{match['score']}%")[m
+[32m+[m[32m        second.metric("Matching skills", len(match["matching"]))[m
+[32m+[m[32m        third.metric("Skills to build", len(match["missing"]))[m
+[32m+[m[32m        st.markdown("<div class='studio-note'>Your resume and job description are loaded. Choose a workspace from the left to explore your match, build a plan, or practise interviews.</div>", unsafe_allow_html=True)[m
+[32m+[m[32m        return[m
+     if "resume" not in st.session_state:[m
+[31m-        st.markdown("<div class='form-title'>Get your personalised career plan</div><p>Begin by uploading your resume. The next step will open automatically.</p>", unsafe_allow_html=True)[m
+[31m-        st.markdown("<div class='helper'><b>Step 1 of 2 — Upload your resume</b><br>Use a PDF resume. We will extract the skills and projects you already have, so every recommendation stays truthful.</div>", unsafe_allow_html=True)[m
+[32m+[m[32m        st.markdown("<div class='form-title'>01 / Add your resume</div><p>Start with the experience you already have. Your plan will be grounded in these details.</p>", unsafe_allow_html=True)[m
+[32m+[m[32m        st.progress(0.5, text="Step 1 of 2 · Resume")[m
+         uploaded=st.file_uploader("Your resume (PDF)", type="pdf", key="home_resume")[m
+         if uploaded:[m
+             try:[m
+[36m@@ -69,8 +124,9 @@[m [mdef intake_form():[m
+                 st.error(str(e))[m
+         return[m
+     r=st.session_state.resume[m
+[31m-    st.markdown("<div class='form-title'>Resume uploaded successfully</div><p>Great—your resume is ready. Now add the job you want to target.</p>", unsafe_allow_html=True)[m
+[31m-    st.markdown(f"<div class='helper'><b>✓ Resume profile ready: {r['name']}</b><br>Detected skills: {', '.join(r['technical_skills']) or 'No specific skills detected yet'}<br><br><b>Step 2 of 2 — Add your target job below</b></div>", unsafe_allow_html=True)[m
+[32m+[m[32m    st.markdown("<div class='form-title'>02 / Choose a target role</div><p>Your resume is in. Add a job description to map your evidence against its requirements.</p>", unsafe_allow_html=True)[m
+[32m+[m[32m    st.progress(1.0, text="Step 2 of 2 · Target role")[m
+[32m+[m[32m    st.markdown(f"<div class='helper'><b>Resume ready: {html.escape(r['name'])}</b><br>Detected skills: {html.escape(', '.join(r['technical_skills']) or 'No specific skills detected yet')}</div>", unsafe_allow_html=True)[m
+     jd_text=st.text_area("Job description", height=160, key="home_jd", placeholder="Paste the job description here. Example: We are looking for a Data Analyst with Python, SQL, Excel, dashboarding, and communication skills...")[m
+     st.caption("Or upload the job description if you have it as a document.")[m
+     jd_file=st.file_uploader("Job description file (PDF or TXT)", type=["pdf", "txt"], key="home_jd_file")[m
+[36m@@ -79,62 +135,66 @@[m [mdef intake_form():[m
+             load_job(jd_text, jd_file)[m
+             st.session_state.page="Career Studio ✨"[m
+             st.rerun()[m
+[31m-        except ValueError as e: st.error(str(e))[m
+[32m+[m[32m        except ValueError as e:[m
+[32m+[m[32m            st.error(str(e))[m
+ [m
+ nav_pages=["Home", "Career Studio ✨", "Resume Analysis", "Job Matching", "Skill Gap", "Resume Improvement", "Career Roadmap", "Interview Preparation", "Mock Interview", "RAG Assistant", "Prompt Evaluation"][m
+[31m-if "page" not in st.session_state: st.session_state.page="Home"[m
+[31m-if ready():[m
+[31m-    st.markdown("<div class='nav-button'>", unsafe_allow_html=True)[m
+[31m-    for row in [nav_pages[:7], nav_pages[7:]]:[m
+[31m-        nav_cols=st.columns(len(row))[m
+[31m-        for col, item in zip(nav_cols, row):[m
+[31m-            with col:[m
+[31m-                if st.button(item, key=f"nav_{item}", type="primary", use_container_width=True):[m
+[31m-                    st.session_state.page=item[m
+[31m-    st.markdown("</div>", unsafe_allow_html=True)[m
+[31m-    page=st.session_state.page[m
+[31m-else:[m
+[31m-    page="Home"[m
+[31m-st.divider()[m
+[32m+[m[32mif "page" not in st.session_state:[m
+[32m+[m[32m    st.session_state.page="Home"[m
+ controls={"role":"Data Analyst", "priority":"Skill building", "weeks":4, "depth":"practical", "tone":"supportive"}[m
+[31m-if page == "Career Studio ✨":[m
+[31m-    st.markdown("<div class='helper'><b>Set your plan preferences</b><br>These choices guide the Career Studio to create a plan that fits your target job and current priority. You can change them anytime.</div>", unsafe_allow_html=True)[m
+[31m-    with st.expander("Choose plan preferences", expanded=True):[m
+[31m-        control_cols=st.columns(5)[m
+[31m-        controls={[m
+[31m-            "role": control_cols[0].text_input("Target role", "Data Analyst"),[m
+[31m-            "priority": control_cols[1].selectbox("Focus", ["Skill building", "ATS resume", "Interview confidence", "Portfolio projects"]),[m
+[31m-            "weeks": control_cols[2].select_slider("Sprint", options=[2, 4, 6, 8, 12], value=4),[m
+[31m-            "depth": control_cols[3].select_slider("Detail", options=["concise", "practical", "detailed"], value="practical"),[m
+[31m-            "tone": control_cols[4].selectbox("Coach voice", ["supportive", "direct", "professional"]),[m
+[31m-        }[m
+[32m+[m[32mwith st.sidebar:[m
+[32m+[m[32m    st.markdown("<div class='brand'><div class='brand-icon'>✳</div><div><div class='brand-name'>CAREER<br>FOUNDRY</div><div class='brand-sub'>LOCAL CAREER LAB</div></div></div>", unsafe_allow_html=True)[m
+[32m+[m[32m    if ready():[m
+[32m+[m[32m        st.caption("WORKSPACE")[m
+[32m+[m[32m        current_page=st.session_state.page if st.session_state.page in nav_pages else "Career Studio ✨"[m
+[32m+[m[32m        page=st.radio("Workspace", nav_pages, index=nav_pages.index(current_page), key="workspace_page", label_visibility="collapsed")[m
+[32m+[m[32m        st.session_state.page=page[m
+[32m+[m[32m        if page == "Career Studio ✨":[m
+[32m+[m[32m            st.divider()[m
+[32m+[m[32m            st.caption("PLAN SETTINGS")[m
+[32m+[m[32m            controls={[m
+[32m+[m[32m                "role": st.text_input("Target role", "Data Analyst", key="studio_role"),[m
+[32m+[m[32m                "priority": st.selectbox("Focus", ["Skill building", "ATS resume", "Interview confidence", "Portfolio projects"], key="studio_priority"),[m
+[32m+[m[32m                "weeks": st.select_slider("Sprint length", options=[2, 4, 6, 8, 12], value=4, key="studio_weeks"),[m
+[32m+[m[32m                "depth": st.select_slider("Plan detail", options=["concise", "practical", "detailed"], value="practical", key="studio_depth"),[m
+[32m+[m[32m                "tone": st.selectbox("Coach voice", ["supportive", "direct", "professional"], key="studio_tone"),[m
+[32m+[m[32m            }[m
+[32m+[m[32m        st.divider()[m
+[32m+[m[32m        st.caption("LOCAL INFERENCE · OLLAMA")[m
+[32m+[m[32m        st.caption("Qwen 2.5 3B · runs on this machine")[m
+[32m+[m[32m        st.button("＋  Start a new analysis", use_container_width=True, on_click=reset_workspace)[m
+[32m+[m[32m    else:[m
+[32m+[m[32m        page="Home"[m
+[32m+[m[32m        st.caption("Add your resume and a target job to open your workspace.")[m
+[32m+[m[32m        st.divider()[m
+[32m+[m[32m        st.caption("LOCAL INFERENCE · OLLAMA")[m
+[32m+[m[32m        st.caption("Qwen 2.5 3B · runs on this machine")[m
+[32m+[m[32mst.markdown("<div class='masthead'><div class='masthead-word'>CAREER FOUNDRY</div><div class='masthead-meta'>Evidence in · next move out</div></div>", unsafe_allow_html=True)[m
+ [m
+ if page == "Home":[m
+[31m-    copy, preview=st.columns([1.25, .95], gap="large")[m
+[32m+[m[32m    copy, preview=st.columns([1.25, .8], gap="large")[m
+     with copy:[m
+[31m-        st.markdown("""<div class="hero-copy"><h1>Your career,<br>made clearer.</h1><p>Turn your existing resume into a role-focused action plan. See what matches, what to learn next, and how to prepare—without making up a single detail.</p></div>""", unsafe_allow_html=True)[m
+[31m-        action, secondary=st.columns([1, 1])[m
+[31m-        with action:[m
+[31m-            if st.button("Analyze my resume", type="primary", use_container_width=True): st.session_state.home_action="Resume Analysis"[m
+[31m-        with secondary:[m
+[31m-            if st.button("Explore career studio", use_container_width=True): st.session_state.home_action="Career Studio ✨"[m
+[31m-        st.markdown("<div class='trust'><span class='green'>● ● ● ● ●</span>&nbsp; Evidence-based guidance for students</div>", unsafe_allow_html=True)[m
+[32m+[m[32m        st.markdown("""<div class="hero-copy"><div class="eyebrow">A LOCAL-FIRST CAREER LAB</div><h1>Make your next move<br>with evidence.</h1><p>Turn the experience on your resume into a practical plan for the role you want. Find your strongest signals, see the gaps, and build a next step that stays truthful.</p></div>""", unsafe_allow_html=True)[m
+     with preview:[m
+[31m-        st.markdown("""<div class="resume-card"><div class="resume-label">CAREERCRAFT / PROFILE</div><div class="resume-name">YOUR NAME</div><div class="resume-lines">Target role · Email · Portfolio<br><br>Motivated student preparing for career opportunities through practical projects and focused learning.</div><div class="resume-rule"></div><div class="resume-label">SKILLS</div><div class="resume-lines">Python · SQL · Data Analysis · Git<br>Communication · Problem Solving</div><div class="resume-rule"></div><div class="resume-label">PROJECT HIGHLIGHT</div><div class="resume-lines">Built a practical project, documented the approach, and explained the outcome clearly.</div><div class="resume-rule"></div><div class="resume-label">AI INSIGHT</div><div class="resume-lines">Upload your own resume to generate an evidence-backed plan.</div></div>""", unsafe_allow_html=True)[m
+[31m-    st.divider()[m
+[32m+[m[32m        st.markdown("""<div class="hero-panel"><div class="eyebrow">THE CAREER FOUNDRY METHOD</div><h3>From raw experience<br>to a clear next move.</h3><div class="flow-step"><div class="flow-num">01</div><div class="flow-copy">Bring your evidence<small>Resume skills, projects, and experience</small></div></div><div class="flow-step"><div class="flow-num">02</div><div class="flow-copy">Read the role signals<small>Compare your profile with a real job</small></div></div><div class="flow-step"><div class="flow-num">03</div><div class="flow-copy">Generate your next steps<small>Locally powered by Qwen 2.5 3B</small></div></div></div>""", unsafe_allow_html=True)[m
+[32m+[m[32m    st.markdown("<div class='section-head'><div><div class='eyebrow'>START HERE</div><h2>Build your career snapshot</h2></div><div class='mono'>TWO QUICK STEPS</div></div>", unsafe_allow_html=True)[m
+     intake_form()[m
+[31m-    if st.session_state.get("home_action"):[m
+[31m-        st.info(f"Choose **{st.session_state.home_action}** in the navigation above to continue.")[m
+ [m
+ elif page == "Career Studio ✨":[m
+     if not need_data():[m
+         match=analyze_match(st.session_state.resume, st.session_state.job)[m
+[31m-        st.markdown(f"""<div class="hero"><div class="eyebrow">Career Studio</div><h2>{controls['role']} action sprint</h2><p>{controls['weeks']} weeks · {controls['priority']} · {controls['depth']} plan</p></div>""", unsafe_allow_html=True)[m
+[32m+[m[32m        role=html.escape(controls["role"] or "your target role")[m
+[32m+[m[32m        st.markdown(f"""<div class="section-head"><div><div class="eyebrow">CAREER STUDIO / PERSONALIZED SPRINT</div><h2>{role} action plan</h2></div><div class="mono">{controls['weeks']} WEEKS</div></div>""", unsafe_allow_html=True)[m
+         left, mid, right=st.columns(3)[m
+         left.metric("Match", f"{match['score']}%")[m
+         mid.metric("Skills to strengthen", len(match["missing"]))[m
+         right.metric("Evidence-backed skills", len(match["matching"]))[m
+[31m-        st.caption("Change controls in the sidebar, then regenerate. This is your planning workspace—not a generic chatbot.")[m
+[32m+[m[32m        st.progress(match["score"] / 100, text="Current role alignment")[m
+[32m+[m[32m        st.markdown("<div class='studio-note'>The plan uses evidence from your resume and the job description. Review generated suggestions before using them in an application.</div>", unsafe_allow_html=True)[m
+[32m+[m[32m        skill_cols=st.columns(3)[m
+[32m+[m[32m        for col, label, values in zip(skill_cols, ["ALREADY EVIDENCED", "RELATED SIGNALS", "NEXT SKILLS"], [match["matching"], match["partial"], match["missing"]]):[m
+[32m+[m[32m            col.markdown(f"<div class='eyebrow'>{label}</div>", unsafe_allow_html=True)[m
+[32m+[m[32m            col.write(", ".join(values) or "Nothing detected yet")[m
+         fallback = f"""## Your {controls['weeks']}-week {controls['role']} sprint[m
+ [m
+ ### Career positioning[m
+[36m@@ -151,12 +211,28 @@[m [mStudent candidate with evidence of {', '.join(match['matching']) or 'relevant fo[m
+ [m
+ ### Today[m
+ Choose one missing skill and create a 45-minute learning/practice session."""[m
+[31m-        if st.button("✨ Generate my career blueprint", type="primary", use_container_width=True):[m
+[31m-            prompt=career_blueprint_prompt(st.session_state.resume, st.session_state.job, match, controls)[m
+[31m-            blueprint, live=generate(prompt, fallback)[m
+[31m-            st.session_state.blueprint=blueprint; st.session_state.blueprint_live=live[m
+[32m+[m[32m        if st.button("✳  Generate my career blueprint", type="primary", use_container_width=True):[m
+[32m+[m[32m            if not st.session_state.resume.get("raw_text", "").strip():[m
+[32m+[m[32m                st.error("The resume has no readable text. Upload a text-based PDF before generating a blueprint.")[m
+[32m+[m[32m            else:[m
+[32m+[m[32m                try:[m
+[32m+[m[32m                    with st.spinner("Building a blueprint from your resume and target role…"):[m
+[32m+[m[32m                        prompt=career_blueprint_prompt(st.session_state.resume, st.session_state.job, match, controls)[m
+[32m+[m[32m                        blueprint, live=generate(prompt, fallback, max_tokens=300)[m
+[32m+[m[32m                    if not blueprint.strip():[m
+[32m+[m[32m                        raise ValueError("The model returned an empty blueprint.")[m
+[32m+[m[32m                    if live:[m
+[32m+[m[32m                        blueprint=enforce_blueprint_resume_keywords(blueprint, controls["role"], st.session_state.resume)[m
+[32m+[m[32m                    st.session_state.blueprint=blueprint[m
+[32m+[m[32m                    st.session_state.blueprint_live=live[m
+[32m+[m[32m                except Exception as exc:[m
+[32m+[m[32m                    logger.exception("Career blueprint generation failed")[m
+[32m+[m[32m                    st.error(f"Could not generate the blueprint: {exc}")[m
+         if "blueprint" in st.session_state:[m
+[31m-            st.caption("Live AI blueprint" if st.session_state.blueprint_live else "Offline, evidence-based blueprint")[m
+[32m+[m[32m            st.divider()[m
+[32m+[m[32m            st.caption("LOCAL MODEL · QWEN 2.5 3B" if st.session_state.blueprint_live else "OFFLINE · EVIDENCE-BASED PLAN")[m
+[32m+[m[32m            if not st.session_state.blueprint_live:[m
+[32m+[m[32m                st.warning("Ollama did not return a response. Showing the profile-based fallback plan instead.")[m
+             st.markdown(st.session_state.blueprint)[m
+             st.download_button("Download blueprint", st.session_state.blueprint, "career_blueprint.md", "text/markdown")[m
+ [m
+[36m@@ -170,7 +246,8 @@[m [melif page == "Resume Analysis":[m
+         st.write(f"**Name:** {r['name']}  |  **Email:** {r['email']}")[m
+         st.write("**Detected technical skills:**", ", ".join(r["technical_skills"]) or "None detected")[m
+         for title in ["education", "experience", "projects", "internships", "certifications"]:[m
+[31m-            if r[title]: st.expander(title.title()).write(r[title])[m
+[32m+[m[32m            with st.expander(title.title()):[m
+[32m+[m[32m                st.write(r.get(title) or f"No {title} section was detected in this resume.")[m
+ [m
+ elif page == "Job Matching":[m
+     if not need_data():[m
+[36m@@ -179,8 +256,12 @@[m [melif page == "Job Matching":[m
+         st.progress(a["score"] / 100)[m
+         st.caption(f"Semantic similarity: {a['semantic_similarity']}%")[m
+         cols=st.columns(3)[m
+[31m-        for col,title,values in zip(cols,["Matching skills", "Partial match", "Missing skills"],[a["matching"],a["partial"],a["missing"]]): col.subheader(title); col.write(", ".join(values) or "None")[m
+[31m-        if a["missing_requirements"]: st.warning("Potential missing requirements:\n\n" + "\n".join("- "+x for x in a["missing_requirements"]))[m
+[32m+[m[32m        for col,title,values in zip(cols,["Matching skills", "Partial match", "Missing skills"],[a["matching"],a["partial"],a["missing"]]):[m
+[32m+[m[32m            col.subheader(title)[m
+[32m+[m[32m            col.write(", ".join(values) or "None")[m
+[32m+[m[32m        if a["missing_requirements"]:[m
+[32m+[m[32m            requirements="<br>".join(html.escape(item) for item in a["missing_requirements"])[m
+[32m+[m[32m            st.markdown(f"<div class='match-warning'><strong>Potential missing requirements</strong><br>{requirements}</div>", unsafe_allow_html=True)[m
+ [m
+ elif page == "Skill Gap":[m
+     if not need_data():[m
+[36m@@ -195,11 +276,35 @@[m [melif page == "Skill Gap":[m
+ elif page == "Resume Improvement":[m
+     if not need_data():[m
+         a=analyze_match(st.session_state.resume, st.session_state.job)[m
+[31m-        fallback="""**Recommendations (verify against your actual experience)**\n\n- Professional summary: State your strongest matching skills: %s.\n- Project bullets: use action + tool + outcome; only include real metrics.\n- ATS keywords supported by your resume: %s.\n- Do not add missing skills (%s) until you have learned and practiced them.""" % (", ".join(a["matching"]) or "relevant coursework/projects", ", ".join(a["matching"]), ", ".join(a["missing"]))[m
+[31m-        if st.button("Generate recommendations"):[m
+[31m-            output, live=generate(resume_improvement_prompt(st.session_state.resume, st.session_state.job), fallback)[m
+[31m-            st.caption("LLM-generated" if live else "Offline, fact-constrained guidance")[m
+[31m-            st.markdown(output)[m
+[32m+[m[32m        if not st.session_state.resume.get("raw_text", "").strip():[m
+[32m+[m[32m            st.warning("No readable resume text is available. Upload a text-based resume PDF to get tailored recommendations.")[m
+[32m+[m[32m        else:[m
+[32m+[m[32m            fallback="""## Evidence-based improvement notes[m
+[32m+[m
+[32m+[m[32m### Content and ATS[m
+[32m+[m[32mLead with verified strengths: %s. Reuse matching job keywords only where your resume supports them.[m
+[32m+[m
+[32m+[m[32m### Projects and experience[m
+[32m+[m[32mDescribe your own action, the tool used, and a result you can verify. Add real metrics if available; do not estimate them.[m
+[32m+[m
+[32m+[m[32m### Skills to build[m
+[32m+[m[32mPractise these job requirements before claiming them: %s.""" % (", ".join(a["matching"]) or "the skills and projects already in your resume", ", ".join(a["missing"]) or "no explicit technical gaps detected")[m
+[32m+[m[32m            if st.button("Generate recommendations", type="primary"):[m
+[32m+[m[32m                try:[m
+[32m+[m[32m                    with st.spinner("Reviewing your resume against the target job…"):[m
+[32m+[m[32m                        output, live=generate(resume_improvement_prompt(st.session_state.resume, st.session_state.job), fallback, max_tokens=500)[m
+[32m+[m[32m                    if not output.strip():[m
+[32m+[m[32m                        raise ValueError("The model returned empty recommendations.")[m
+[32m+[m[32m                    st.session_state.recommendations=output[m
+[32m+[m[32m                    st.session_state.recommendations_live=live[m
+[32m+[m[32m                except Exception as exc:[m
+[32m+[m[32m                    logger.exception("Resume recommendation generation failed")[m
+[32m+[m[32m                    st.error(f"Could not generate recommendations: {exc}")[m
+[32m+[m[32m            if "recommendations" in st.session_state:[m
+[32m+[m[32m                st.caption("LOCAL MODEL · QWEN 2.5 3B" if st.session_state.recommendations_live else "OFFLINE · PROFILE-BASED GUIDANCE")[m
+[32m+[m[32m                if not st.session_state.recommendations_live:[m
+[32m+[m[32m                    st.warning("Ollama did not return a response. Showing profile-based guidance instead.")[m
+[32m+[m[32m                st.markdown(st.session_state.recommendations)[m
+ [m
+ elif page == "Career Roadmap":[m
+     if not need_data():[m
+[36m@@ -209,43 +314,170 @@[m [melif page == "Career Roadmap":[m
+ elif page == "Interview Preparation":[m
+     if not need_data():[m
+         a=analyze_match(st.session_state.resume, st.session_state.job)[m
+[31m-        if st.button("Create interview set"):[m
+[31m-            fallback="\n\n".join(f"**{c}:** {q}\n\nAnswer guidance: {g}" for c,q,g in fallback_questions(st.session_state.job["required_skills"], a["missing"]))[m
+[31m-            text, live=generate(interview_prompt(st.session_state.resume, st.session_state.job, a["missing"]), fallback)[m
+[31m-            st.caption("LLM-generated" if live else "Offline interview set"); st.markdown(text)[m
+[32m+[m[32m        if not st.session_state.resume.get("raw_text", "").strip():[m
+[32m+[m[32m            st.warning("Add readable resume text before creating a tailored interview set.")[m
+[32m+[m[32m        else:[m
+[32m+[m[32m            fallback="\n\n".join(f"**{category}:** {question}\n\nAnswer guidance: {guidance}" for category,question,guidance in fallback_questions(st.session_state.job["required_skills"], a["missing"], st.session_state.resume))[m
+[32m+[m[32m            if st.button("Create interview set", type="primary"):[m
+[32m+[m[32m                try:[m
+[32m+[m[32m                    with st.spinner("Building questions from your profile and target role…"):[m
+[32m+[m[32m                        text, live=generate(interview_prompt(st.session_state.resume, st.session_state.job, a["missing"]), fallback, max_tokens=650)[m
+[32m+[m[32m                    if not text.strip():[m
+[32m+[m[32m                        raise ValueError("The model returned an empty interview set.")[m
+[32m+[m[32m                    st.session_state.interview_set=text[m
+[32m+[m[32m                    st.session_state.interview_set_live=live[m
+[32m+[m[32m                except Exception as exc:[m
+[32m+[m[32m                    logger.exception("Interview set generation failed")[m
+[32m+[m[32m                    st.error(f"Could not create the interview set: {exc}")[m
+[32m+[m[32m            if "interview_set" in st.session_state:[m
+[32m+[m[32m                st.caption("LOCAL MODEL · QWEN 2.5 3B" if st.session_state.interview_set_live else "OFFLINE · RESUME-BASED QUESTIONS")[m
+[32m+[m[32m                if not st.session_state.interview_set_live:[m
+[32m+[m[32m                    st.warning("Ollama did not return a response. Showing resume- and job-based questions instead.")[m
+[32m+[m[32m                st.markdown(st.session_state.interview_set)[m
+ [m
+ elif page == "Mock Interview":[m
+     if not need_data():[m
+[31m-        a=analyze_match(st.session_state.resume, st.session_state.job)[m
+[31m-        if "mock" not in st.session_state: st.session_state.mock=fallback_questions(st.session_state.job["required_skills"], a["missing"]); st.session_state.mock_index=0; st.session_state.mock_scores=[][m
+[31m-        i=st.session_state.mock_index[m
+[31m-        if i < len(st.session_state.mock):[m
+[31m-            category, question, guidance=st.session_state.mock[i][m
+[31m-            st.subheader(f"Question {i+1}: {category}"); st.write(question)[m
+[31m-            answer=st.text_area("Your answer", key=f"answer_{i}")[m
+[31m-            if st.button("Submit answer"):[m
+[31m-                if not answer.strip(): st.warning("Please enter an answer.")[m
+[32m+[m[32m        resume=st.session_state.resume[m
+[32m+[m[32m        job=st.session_state.job[m
+[32m+[m[32m        if not resume.get("raw_text", "").strip():[m
+[32m+[m[32m            st.warning("Add readable resume text before starting a resume-based mock interview.")[m
+[32m+[m[32m        elif "mock_questions" not in st.session_state:[m
+[32m+[m[32m            st.markdown("<div class='section-head'><div><div class='eyebrow'>MOCK INTERVIEW / MULTIPLE CHOICE</div><h2>Questions from your profile</h2></div><div class='mono'>UP TO 5 QUESTIONS</div></div>", unsafe_allow_html=True)[m
+[32m+[m[32m            st.caption("The questions use skills, projects, and experience found in your resume, with the target job as secondary context.")[m
+[32m+[m[32m            if st.button("Generate resume-based question set", type="primary"):[m
+[32m+[m[32m                fallback=fallback_mcqs(resume, job)[m
+[32m+[m[32m                if not fallback:[m
+[32m+[m[32m                    st.error("No resume details were available to build questions.")[m
+                 else:[m
+[31m-                    score, feedback=evaluate_answer(answer); st.session_state.mock_scores.append(score); st.success(f"Score: {score}/100 — {feedback}"); st.session_state.mock_index += 1[m
+[32m+[m[32m                    try:[m
+[32m+[m[32m                        with st.spinner("Generating and validating your MCQs…"):[m
+[32m+[m[32m                            fallback_json=json.dumps({"questions":fallback}, ensure_ascii=False)[m
+[32m+[m[32m                            response, live=generate(mock_interview_prompt(resume, job), fallback_json, max_tokens=750)[m
+[32m+[m[32m                            allowed_topics=list(resume.get("technical_skills", [])) + list(job.get("required_skills", []))[m
+[32m+[m[32m                            allowed_topics.extend(section.title() for section in ("education", "experience", "projects", "internships") if resume.get(section))[m
+[32m+[m[32m                            questions, valid=parse_mcqs(response, fallback, allowed_topics)[m
+[32m+[m[32m                            model_question_count=len(questions) if live and valid else 0[m
+[32m+[m[32m                            existing={question["question"].casefold() for question in questions}[m
+[32m+[m[32m                            if model_question_count:[m
+[32m+[m[32m                                for item in fallback:[m
+[32m+[m[32m                                    if item["question"].casefold() not in existing:[m
+[32m+[m[32m                                        questions.append(item)[m
+[32m+[m[32m                                        existing.add(item["question"].casefold())[m
+[32m+[m[32m                                    if len(questions) >= 5:[m
+[32m+[m[32m                                        break[m
+[32m+[m[32m                        if not questions:[m
+[32m+[m[32m                            raise ValueError("No valid questions could be created from this resume.")[m
+[32m+[m[32m                        st.session_state.mock_questions=questions[m
+[32m+[m[32m                        st.session_state.mock_questions_live=bool(model_question_count)[m
+[32m+[m[32m                        st.session_state.mock_questions_mixed=bool(model_question_count and len(questions)>model_question_count)[m
+[32m+[m[32m                        st.session_state.mock_answers={}[m
+[32m+[m[32m                        st.rerun()[m
+[32m+[m[32m                    except Exception as exc:[m
+[32m+[m[32m                        logger.exception("Mock interview question generation failed")[m
+[32m+[m[32m                        st.error(f"Could not generate the question set: {exc}")[m
+         else:[m
+[31m-            average=round(sum(st.session_state.mock_scores)/len(st.session_state.mock_scores))[m
+[31m-            st.success(f"Mock interview complete. Overall score: {average}/100")[m
+[31m-            st.write("Strong areas: responses with structure and outcomes. Improvement: practise concise STAR answers and prepare concrete projects.")[m
+[31m-            if st.button("Restart mock interview"): del st.session_state.mock; st.rerun()[m
+[32m+[m[32m            questions=st.session_state.mock_questions[m
+[32m+[m[32m            answers=st.session_state.mock_answers[m
+[32m+[m[32m            if st.session_state.mock_questions_live and not st.session_state.mock_questions_mixed:[m
+[32m+[m[32m                st.caption("LOCAL MODEL · VALIDATED JSON")[m
+[32m+[m[32m            elif st.session_state.mock_questions_mixed:[m
+[32m+[m[32m                st.caption("LOCAL MODEL + PROFILE-BASED COMPLETION")[m
+[32m+[m[32m            else:[m
+[32m+[m[32m                st.caption("PROFILE-BASED QUESTION SET · FALLBACK")[m
+[32m+[m[32m            current=next((index for index in range(len(questions)) if index not in answers), None)[m
+[32m+[m[32m            last_answer=st.session_state.pop("mock_last_answer", None)[m
+[32m+[m[32m            if last_answer is not None:[m
+[32m+[m[32m                answered=questions[last_answer][m
+[32m+[m[32m                if answers[last_answer] == answered["correct_answer"]:[m
+[32m+[m[32m                    st.success("Correct answer")[m
+[32m+[m[32m                else:[m
+[32m+[m[32m                    st.error(f"Not quite. Correct answer: {answered['correct_answer']}. {answered['options'][answered['correct_answer']]}")[m
+[32m+[m[32m                st.info(answered["explanation"])[m
+[32m+[m[32m            if current is None:[m
+[32m+[m[32m                correct=sum(answers[index] == question["correct_answer"] for index, question in enumerate(questions))[m
+[32m+[m[32m                st.success(f"Interview set complete · {correct}/{len(questions)} correct")[m
+[32m+[m[32m                if st.button("Restart mock interview"):[m
+[32m+[m[32m                    for key in ("mock_questions", "mock_questions_live", "mock_questions_mixed", "mock_answers", "mock_last_answer"):[m
+[32m+[m[32m                        st.session_state.pop(key, None)[m
+[32m+[m[32m                    st.rerun()[m
+[32m+[m[32m            else:[m
+[32m+[m[32m                question=questions[current][m
+[32m+[m[32m                st.progress(current / len(questions), text=f"Question {current + 1} of {len(questions)}")[m
+[32m+[m[32m                st.markdown(f"**{question['topic']}**")[m
+[32m+[m[32m                st.subheader(question["question"])[m
+[32m+[m[32m                labels=list(question["options"])[m
+[32m+[m[32m                selected=st.radio("Choose one answer", labels, format_func=lambda label:f"{label}. {question['options'][label]}", key=f"mock_answer_{current}", label_visibility="collapsed")[m
+[32m+[m[32m                if st.button("Submit answer", type="primary", key=f"submit_mock_{current}"):[m
+[32m+[m[32m                    st.session_state.mock_answers[current]=selected[m
+[32m+[m[32m                    st.session_state.mock_last_answer=current[m
+[32m+[m[32m                    st.rerun()[m
+ [m
+ elif page == "RAG Assistant":[m
+[31m-    q=st.text_input("Ask about placement preparation")[m
+[31m-    if q:[m
+[31m-        sources=retrieve(q)[m
+[31m-        st.subheader("Retrieved sources")[m
+[31m-        for source in sources: st.expander(f"{source['source']} ({source['score']:.2f})").write(source["text"])[m
+[31m-        context="\n".join(s["text"] for s in sources)[m
+[31m-        out, live=generate(f"Answer only from this career context. Context: {context}\nQuestion: {q}", "Based on the retrieved guidance: " + context)[m
+[31m-        st.subheader("Answer"); st.write(out)[m
+[32m+[m[32m    if "rag_history" not in st.session_state:[m
+[32m+[m[32m        st.session_state.rag_history=[][m
+[32m+[m[32m    with st.form("rag_question_form", clear_on_submit=True):[m
+[32m+[m[32m        question=st.text_input("Ask about your resume, target job, or placement preparation")[m
+[32m+[m[32m        ask=st.form_submit_button("Ask Career Foundry", type="primary")[m
+[32m+[m[32m    if ask:[m
+[32m+[m[32m        if not question.strip():[m
+[32m+[m[32m            st.warning("Enter a question first.")[m
+[32m+[m[32m        else:[m
+[32m+[m[32m            documents=[[m
+[32m+[m[32m                {"source":"Your resume", "text":st.session_state.resume.get("raw_text", "")},[m
+[32m+[m[32m                {"source":"Target job", "text":st.session_state.job.get("raw_text", "")},[m
+[32m+[m[32m            ][m
+[32m+[m[32m            sources=retrieve(question, documents=documents)[m
+[32m+[m[32m            if not sources:[m
+[32m+[m[32m                answer="I couldn't find relevant information in the loaded resume, target job, or career notes. Try asking about a detail those documents contain."[m
+[32m+[m[32m                st.session_state.rag_history.append({"question":question, "answer":answer, "sources":[]})[m
+[32m+[m[32m            else:[m
+[32m+[m[32m                context="\n\n".join(f"Source: {source['source']}\n{source['text']}" for source in sources)[m
+[32m+[m[32m                history="\n".join(f"Earlier question: {turn['question']}\nEarlier answer: {turn['answer']}" for turn in st.session_state.rag_history[-3:])[m
+[32m+[m[32m                prompt=f"Answer the question using only the retrieved context below. If the context does not contain the answer, say that you could not find it. Do not add outside facts.\nConversation history:\n{history or 'None'}\nRetrieved context:\n{context}\nQuestion: {question}"[m
+[32m+[m[32m                with st.spinner("Searching your documents and preparing a grounded answer…"):[m
+[32m+[m[32m                    answer, live=generate(prompt, "I couldn't produce an answer from the retrieved context. Please try a more specific question.", max_tokens=250)[m
+[32m+[m[32m                if not live:[m
+[32m+[m[32m                    st.warning("Ollama did not respond. The retrieved sources are still available below.")[m
+[32m+[m[32m                st.session_state.rag_history.append({"question":question, "answer":answer, "sources":sources})[m
+[32m+[m[32m    for turn in st.session_state.rag_history:[m
+[32m+[m[32m        st.markdown("**You asked**")[m
+[32m+[m[32m        st.write(turn["question"])[m
+[32m+[m[32m        st.markdown("**Career Foundry**")[m
+[32m+[m[32m        st.write(turn["answer"])[m
+[32m+[m[32m        for source in turn["sources"]:[m
+[32m+[m[32m            st.expander(f"Source: {source['source']} · relevance {source['score']:.2f}").write(source["text"])[m
+ [m
+ elif page == "Prompt Evaluation":[m
+[31m-    task=st.text_input("Task", "Suggest a truthful one-line resume summary for a Python student")[m
+[32m+[m[32m    task=st.text_area("Prompt to evaluate", "Suggest a truthful summary tailored to my target job.", height=100)[m
+     if st.button("Compare prompts"):[m
+[31m-        zero,_=generate(task, "Zero-shot baseline: emphasise only verified Python learning and projects.")[m
+[31m-        few,_=generate("Example: Facts: SQL dashboard project. Summary: Built a SQL dashboard project.\nNow " + task, "Few-shot structured: mention verified skills, project context, and target role; omit unsupported claims.")[m
+[31m-        df=prompt_comparison(zero, few); st.dataframe(df.drop(columns=["Output"]), use_container_width=True); st.subheader("Outputs"); st.write("**Zero-shot:**", zero); st.write("**Few-shot:**", few)[m
+[32m+[m[32m        if not task.strip():[m
+[32m+[m[32m            st.warning("Enter a prompt to compare.")[m
+[32m+[m[32m        else:[m
+[32m+[m[32m            resume_text=st.session_state.resume.get("raw_text", "") if ready() else ""[m
+[32m+[m[32m            job_text=st.session_state.job.get("raw_text", "") if ready() else ""[m
+[32m+[m[32m            evidence=f"Resume:\n{resume_text}\nTarget job:\n{job_text}".strip()[m
+[32m+[m[32m            zero_prompt=f"Perform this task using only the supplied evidence. If evidence is missing, say so.\nTask: {task}\nEvidence:\n{evidence or 'No resume or job is loaded.'}"[m
+[32m+[m[32m            few_prompt=f"Perform the task using only supplied evidence. Structure the answer as: verified evidence, role relevance, concise recommendation. Use placeholders for missing facts and never invent details.\nTask: {task}\nEvidence:\n{evidence or 'No resume or job is loaded.'}"[m
+[32m+[m[32m            try:[m
+[32m+[m[32m                with st.spinner("Running both prompt variants through the local model…"):[m
+[32m+[m[32m                    zero, zero_live=generate(zero_prompt, "", max_tokens=300)[m
+[32m+[m[32m                    few, few_live=generate(few_prompt, "", max_tokens=300)[m
+[32m+[m[32m                if not zero_live or not few_live:[m
+[32m+[m[32m                    logger.error("Prompt evaluation could not obtain both model outputs")[m
+[32m+[m[32m                    st.error("Prompt comparison could not complete because the local model did not return both outputs. Check that Ollama is running, then retry.")[m
+[32m+[m[32m                else:[m
+[32m+[m[32m                    st.session_state.prompt_evaluation={"task":task, "evidence":evidence, "zero":zero, "few":few,[m
+[32m+[m[32m                        "scores":prompt_comparison(zero, few, task, evidence)}[m
+[32m+[m[32m            except Exception as exc:[m
+[32m+[m[32m                logger.exception("Prompt evaluation failed")[m
+[32m+[m[32m                st.error(f"Could not evaluate the prompt: {exc}")[m
+[32m+[m[32m    if "prompt_evaluation" in st.session_state:[m
+[32m+[m[32m        result=st.session_state.prompt_evaluation[m
+[32m+[m[32m        st.caption("Scores are heuristic comparisons of task-term relevance, evidence overlap, and response detail.")[m
+[32m+[m[32m        st.dataframe(result["scores"].drop(columns=["Output"]), use_container_width=True, hide_index=True)[m
+[32m+[m[32m        st.subheader("Generated outputs")[m
+[32m+[m[32m        out_cols=st.columns(2)[m
+[32m+[m[32m        out_cols[0].markdown("**Zero-shot**")[m
+[32m+[m[32m        out_cols[0].write(result["zero"])[m
+[32m+[m[32m        out_cols[1].markdown("**Structured prompt**")[m
+[32m+[m[32m        out_cols[1].write(result["few"])[m
+[1mdiff --git a/src/embeddings.py b/src/embeddings.py[m
+[1mindex 12ce92c..473ee42 100644[m
+[1m--- a/src/embeddings.py[m
+[1m+++ b/src/embeddings.py[m
+[36m@@ -15,7 +15,13 @@[m [mdef semantic_similarity(first: str, second: str) -> float:[m
+     if not first.strip() or not second.strip(): return 0.0[m
+     model = _model()[m
+     if model:[m
+[31m-        vectors = model.encode([first, second])[m
+[31m-        return float(cosine_similarity([vectors[0]], [vectors[1]])[0][0])[m
+[31m-    matrix = TfidfVectorizer(stop_words="english").fit_transform([first, second])[m
+[32m+[m[32m        try:[m
+[32m+[m[32m            vectors = model.encode([first, second])[m
+[32m+[m[32m            return float(cosine_similarity([vectors[0]], [vectors[1]])[0][0])[m
+[32m+[m[32m        except Exception:[m
+[32m+[m[32m            pass[m
+[32m+[m[32m    try:[m
+[32m+[m[32m        matrix = TfidfVectorizer(stop_words="english").fit_transform([first, second])[m
+[32m+[m[32m    except ValueError:[m
+[32m+[m[32m        return 0.0[m
+     return float(cosine_similarity(matrix[0], matrix[1])[0][0])[m
+[1mdiff --git a/src/evaluation.py b/src/evaluation.py[m
+[1mindex b2ceffa..2ead2ea 100644[m
+[1m--- a/src/evaluation.py[m
+[1m+++ b/src/evaluation.py[m
+[36m@@ -1,3 +1,26 @@[m
+[32m+[m[32mimport re[m
+ import pandas as pd[m
+[31m-def prompt_comparison(zero, few):[m
+[31m-    return pd.DataFrame([{"Prompt type":"Zero-shot","Output quality":"Baseline","Relevance":"Review manually","Completeness":"Review manually","Hallucination/error observations":"Check against resume facts","Output":zero}, {"Prompt type":"Few-shot","Output quality":"Structured","Relevance":"Review manually","Completeness":"Review manually","Hallucination/error observations":"Check against resume facts","Output":few}])[m
+[32m+[m
+[32m+[m[32m_STOP_WORDS={"the", "and", "for", "with", "from", "that", "this", "you", "your", "are", "was", "were", "what", "how", "why", "use", "using", "only", "into", "about", "have", "has", "had", "can", "could", "should", "would", "will", "not", "but", "our", "their", "they", "them", "then", "than", "when", "where", "who", "which", "while", "its", "it", "a", "an", "of", "to", "in", "on", "is", "be", "as", "at", "by", "or"}[m
+[32m+[m
+[32m+[m[32mdef _terms(text):[m
+[32m+[m[32m    return {term.lower() for term in re.findall(r"[A-Za-z][A-Za-z0-9+#.-]*", text or "") if len(term)>1 and term.lower() not in _STOP_WORDS}[m
+[32m+[m
+[32m+[m[32mdef _evaluate_output(output, task, evidence):[m
+[32m+[m[32m    output_terms=_terms(output)[m
+[32m+[m[32m    task_terms=_terms(task)[m
+[32m+[m[32m    evidence_terms=_terms(evidence)[m
+[32m+[m[32m    relevance=round(100 * len(output_terms & task_terms) / len(task_terms)) if task_terms else 0[m
+[32m+[m[32m    evidence_alignment=round(100 * len(output_terms & evidence_terms) / len(output_terms)) if evidence_terms and output_terms else None[m
+[32m+[m[32m    detail=min(100, round(100 * len((output or "").split()) / 70))[m
+[32m+[m[32m    dimensions=[(relevance, .55), (detail, .2)][m
+[32m+[m[32m    if evidence_alignment is not None:[m
+[32m+[m[32m        dimensions.append((evidence_alignment, .25))[m
+[32m+[m[32m    score=round(sum(value*weight for value, weight in dimensions) / sum(weight for _, weight in dimensions))[m
+[32m+[m[32m    return {"Overall score":score, "Task relevance":relevance, "Evidence alignment":evidence_alignment, "Response detail":detail}[m
+[32m+[m
+[32m+[m[32mdef prompt_comparison(zero, few, task="", evidence=""):[m
+[32m+[m[32m    rows=[][m
+[32m+[m[32m    for prompt_type, output in (("Zero-shot", zero), ("Few-shot", few)):[m
+[32m+[m[32m        rows.append({"Prompt type":prompt_type, **_evaluate_output(output, task, evidence), "Output":output})[m
+[32m+[m[32m    return pd.DataFrame(rows)[m
+[1mdiff --git a/src/interview.py b/src/interview.py[m
+[1mindex 24debd0..6639797 100644[m
+[1m--- a/src/interview.py[m
+[1m+++ b/src/interview.py[m
+[36m@@ -1,12 +1,144 @@[m
+[31m-def fallback_questions(job_skills, missing):[m
+[31m-    focus = ", ".join((missing or job_skills or ["your core skills"])[:3])[m
+[32m+[m[32mimport json[m
+[32m+[m[32mimport re[m
+[32m+[m[32mfrom src.skill_extractor import SKILL_CATALOG[m
+[32m+[m
+[32m+[m[32mdef fallback_questions(job_skills, missing, resume=None):[m
+[32m+[m[32m    resume=resume or {}[m
+[32m+[m[32m    resume_skills=resume.get("technical_skills", [])[m
+[32m+[m[32m    focus=", ".join((resume_skills or job_skills or missing or ["your core skills"])[:3])[m
+[32m+[m[32m    project=(resume.get("projects") or "").strip()[m
+[32m+[m[32m    project_question=f"Walk me through this resume project: {project.splitlines()[0][:100]}" if project else "Walk me through a project from requirements to outcome."[m
+[32m+[m[32m    technical_question=f"Describe a real task where you used {focus}. What approach and result can you explain?" if resume_skills else f"How would you approach building evidence in {focus} for this role?"[m
+     return [[m
+[31m-      ("Technical", f"Explain how you would use {focus} in this role.", "Use a structured example: problem, approach, trade-offs, result."),[m
+[31m-      ("Project", "Walk me through a project from requirements to outcome.", "State only real work; quantify impact where you can."),[m
+[31m-      ("Behavioral", "Tell me about a time you received difficult feedback.", "Use STAR: situation, task, action, result."),[m
+[31m-      ("HR", "Why does this role fit your next career step?", "Connect genuine interests and current evidence to the role.")][m
+[32m+[m[32m      ("Technical", technical_question, "Explain the problem, your specific actions, trade-offs, and a verifiable result."),[m
+[32m+[m[32m      ("Project", project_question, "State only your own work; quantify impact only when you have real evidence."),[m
+[32m+[m[32m      ("Behavioral", "Describe a real time you received difficult feedback and what you changed.", "Use STAR: situation, task, action, result."),[m
+[32m+[m[32m      ("HR", "Why does this target role fit your next career step?", "Connect genuine interests and resume evidence to the role.")][m
+ [m
+ def evaluate_answer(answer: str):[m
+     words = len(answer.split())[m
+     score = min(100, round(words * 1.2 + (20 if any(x in answer.lower() for x in ["result", "impact", "learned"]) else 0)))[m
+     return score, "Add a concrete example, your specific actions, and a measurable result." if score < 65 else "Good structure. Make the impact even more specific."[m
+[32m+[m
+[32m+[m[32m_SKILL_QUESTIONS = {[m
+[32m+[m[32m    "python": ("Which Python structure is best suited to map unique keys to values?", "A dictionary", ["A list", "A tuple", "A set"], "A dictionary stores values under unique keys."),[m
+[32m+[m[32m    "sql": ("Which SQL clause filters rows before aggregation?", "WHERE", ["ORDER BY", "HAVING", "LIMIT"], "WHERE filters source rows before GROUP BY; HAVING filters grouped results."),[m
+[32m+[m[32m    "pandas": ("Which Pandas operation combines DataFrames using a shared key?", "merge", ["melt", "describe", "dropna"], "merge joins DataFrames using one or more key columns."),[m
+[32m+[m[32m    "numpy": ("What lets NumPy apply operations across arrays without a Python loop?", "Vectorization", ["Serialization", "Inheritance", "Indexing only"], "Vectorized operations run element-wise through optimized array operations."),[m
+[32m+[m[32m    "git": ("Which Git command records staged changes in the repository history?", "git commit", ["git status", "git diff", "git fetch"], "git commit creates a repository commit from staged changes."),[m
+[32m+[m[32m    "machine learning": ("What is a common sign that a machine-learning model is overfitting?", "Training performance is strong but validation performance is weak", ["Both training and validation performance improve together", "The dataset has no labels", "The model has fewer parameters"], "A large train/validation gap commonly indicates overfitting."),[m
+[32m+[m[32m    "power bi": ("In Power BI, what is a measure typically used for?", "A calculation evaluated in the current filter context", ["A fixed image on a report page", "A source-control commit", "A PDF text extractor"], "Measures calculate values dynamically under report filters."),[m
+[32m+[m[32m    "excel": ("Which Excel feature is designed to summarize and group tabular data interactively?", "PivotTable", ["WordArt", "Page Break Preview", "Find and Replace"], "PivotTables aggregate and reorganize data for analysis."),[m
+[32m+[m[32m    "java": ("What does a Java constructor primarily do?", "Initialize a new object", ["Delete a package", "Sort every collection", "Compile source files at runtime"], "A constructor initializes a newly created instance."),[m
+[32m+[m[32m    "javascript": ("Which JavaScript construct is commonly used to handle a promise's success value?", ".then()", [".catchOnly()", ".resolveNow()", ".awaited()"], ".then() registers a handler for a fulfilled promise."),[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m_ANSWER_CYCLE = ("A", "C", "B", "D")[m
+[32m+[m
+[32m+[m[32mdef _place_correct_option(question, correct_text, distractors, explanation, index, topic):[m
+[32m+[m[32m    options=[correct_text, *distractors[:3]][m
+[32m+[m[32m    answer=_ANSWER_CYCLE[index % len(_ANSWER_CYCLE)][m
+[32m+[m[32m    labels=["A", "B", "C", "D"][m
+[32m+[m[32m    options_by_label=dict(zip(labels, options))[m
+[32m+[m[32m    current=labels[0][m
+[32m+[m[32m    options_by_label[current], options_by_label[answer]=options_by_label[answer], options_by_label[current][m
+[32m+[m[32m    return {"question":question, "topic":topic, "options":options_by_label,[m
+[32m+[m[32m          "correct_answer":answer, "explanation":explanation}[m
+[32m+[m
+[32m+[m[32mdef fallback_mcqs(resume, job=None, count=5):[m
+[32m+[m[32m    skills=list(dict.fromkeys(resume.get("technical_skills", [])))[m
+[32m+[m[32m    required=(job or {}).get("required_skills", [])[m
+[32m+[m[32m    skills.extend(skill for skill in required if skill not in skills)[m
+[32m+[m[32m    profile_text=(resume.get("raw_text") or "").strip()[m
+[32m+[m[32m    if not profile_text:[m
+[32m+[m[32m      return [][m
+[32m+[m[32m    questions=[][m
+[32m+[m[32m    resume_sections=[(section, label) for section, label in (("projects", "project"), ("experience", "experience"), ("internships", "internship")) if (resume.get(section) or "").strip()][m
+[32m+[m[32m    skill_limit=max(1, count - 1) if resume_sections else count[m
+[32m+[m[32m    for skill in skills:[m
+[32m+[m[32m      if len(questions) >= skill_limit:[m
+[32m+[m[32m        break[m
+[32m+[m[32m      bank=_SKILL_QUESTIONS.get(skill.lower())[m
+[32m+[m[32m      if bank:[m
+[32m+[m[32m        question, correct, distractors, explanation=bank[m
+[32m+[m[32m      else:[m
+[32m+[m[32m        question=f"Your resume lists {skill}. Which response best demonstrates hands-on experience with it?"[m
+[32m+[m[32m        correct=f"Describe a specific task completed with {skill}, your approach, and a verifiable result."[m
+[32m+[m[32m        distractors=["Repeat the skill name without an example.", "Describe a result without explaining your contribution.", "Claim a metric that is not supported by the resume."][m
+[32m+[m[32m        explanation="A specific action and verifiable outcome provide evidence of practical experience."[m
+[32m+[m[32m      questions.append(_place_correct_option(question, correct, distractors, explanation, len(questions), skill))[m
+[32m+[m[32m    for section, label in resume_sections:[m
+[32m+[m[32m      details=(resume.get(section) or "").strip()[m
+[32m+[m[32m      if details and len(questions) < count:[m
+[32m+[m[32m        anchor=details.splitlines()[0][:100][m
+[32m+[m[32m        question=f"When discussing this resume {label}: {anchor}, what best demonstrates your contribution?"[m
+[32m+[m[32m        correct="Explain your own actions, the tools used, and an outcome you can verify."[m
+[32m+[m[32m        distractors=["Describe only what the team did.", "Add an unverified percentage to make the result sound larger.", "List tasks without connecting them to the project's goal."][m
+[32m+[m[32m        questions.append(_place_correct_option(question, correct, distractors, "A specific action, tools, and a verifiable outcome make the example credible.", len(questions), label.title()))[m
+[32m+[m[32m    for skill in skills:[m
+[32m+[m[32m      if len(questions) >= count:[m
+[32m+[m[32m        break[m
+[32m+[m[32m      question=f"Which detail would best support your resume's {skill} claim in an interview?"[m
+[32m+[m[32m      correct=f"Explain a specific task where you used {skill}, your own action, and an outcome you can verify."[m
+[32m+[m[32m      distractors=["Repeat the skill name without an example.", "Describe a team result without your contribution.", "Add a metric that is not documented in the resume."][m
+[32m+[m[32m      explanation=f"A concrete example of using {skill} connects the resume claim to verifiable evidence."[m
+[32m+[m[32m      questions.append(_place_correct_option(question, correct, distractors, explanation, len(questions), skill))[m
+[32m+[m[32m    if not questions:[m
+[32m+[m[32m      anchor=next((line.strip() for line in profile_text.splitlines() if line.strip()), "the profile details provided")[:100][m
+[32m+[m[32m      question=f"Which interview response best supports the resume detail: {anchor}?"[m
+[32m+[m[32m      questions.append(_place_correct_option(question, "Give a concrete example that explains your own action and its result.", ["State an unsupported achievement.", "Repeat the detail without context.", "Describe a skill absent from the resume."], "A concrete example provides support for the resume claim without adding new facts.", 0, "Resume evidence"))[m
+[32m+[m[32m    return questions[:count][m
+[32m+[m
+[32m+[m[32mdef parse_mcqs(response, fallback, allowed_topics=None):[m
+[32m+[m[32m    text=(response or "").strip()[m
+[32m+[m[32m    if text.startswith("```"):[m
+[32m+[m[32m      text=text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()[m
+[32m+[m[32m      if text.lower().startswith("json"):[m
+[32m+[m[32m        text=text[4:].strip()[m
+[32m+[m[32m    try:[m
+[32m+[m[32m      payload=json.loads(text)[m
+[32m+[m[32m    except (TypeError, json.JSONDecodeError):[m
+[32m+[m[32m      return fallback, False[m
+[32m+[m[32m    items=payload.get("questions") if isinstance(payload, dict) else payload[m
+[32m+[m[32m    if not isinstance(items, list):[m
+[32m+[m[32m      return fallback, False[m
+[32m+[m[32m    valid=[][m
+[32m+[m[32m    seen=set()[m
+[32m+[m[32m    allowed={re.sub(r"[^a-z0-9+#]", "", str(topic).lower()) for topic in (allowed_topics or [])}[m
+[32m+[m[32m    known_skills={re.sub(r"[^a-z0-9+#]", "", skill.lower()) for skills in SKILL_CATALOG.values() for skill in skills}[m
+[32m+[m[32m    for item in items:[m
+[32m+[m[32m      if not isinstance(item, dict):[m
+[32m+[m[32m        continue[m
+[32m+[m[32m      question=str(item.get("question", "")).strip()[m
+[32m+[m[32m      topic=str(item.get("topic", "Resume profile")).strip()[m
+[32m+[m[32m      options=item.get("options")[m
+[32m+[m[32m      if isinstance(options, list) and len(options)==4:[m
+[32m+[m[32m        options=dict(zip(("A", "B", "C", "D"), options))[m
+[32m+[m[32m      if not isinstance(options, dict):[m
+[32m+[m[32m        continue[m
+[32m+[m[32m      normalized={key:str(options.get(key, "")).strip() for key in ("A", "B", "C", "D")}[m
+[32m+[m[32m      answer=str(item.get("correct_answer", "")).strip().upper()[m
+[32m+[m[32m      if len(answer)>1 and answer[0] in normalized and answer[1] in ".): ":[m
+[32m+[m[32m        answer=answer[0][m
+[32m+[m[32m      explanation=str(item.get("explanation", "")).strip()[m
+[32m+[m[32m      question_text=question + " " + normalized.get(answer, "")[m
+[32m+[m[32m      topic_text=re.sub(r"[^a-z0-9+#]", "", topic.lower())[m
+[32m+[m[32m      mentioned_skills={skill for skill in known_skills if skill and re.search(r"(?<![a-z0-9])" + re.escape(skill) + r"(?![a-z0-9])", question_text, re.IGNORECASE)}[m
+[32m+[m[32m      unsupported=mentioned_skills - allowed[m
+[32m+[m[32m      if allowed and (not any(skill in topic_text or topic_text in skill for skill in allowed if skill)[m
+[32m+[m[32m              or unsupported):[m
+[32m+[m[32m        continue[m
+[32m+[m[32m      if (not question or question.casefold() in seen or not explanation or answer not in normalized[m
+[32m+[m[32m          or any(not value for value in normalized.values()) or len(set(normalized.values()))<4):[m
+[32m+[m[32m        continue[m
+[32m+[m[32m      seen.add(question.casefold())[m
+[32m+[m[32m      valid.append({"question":question, "topic":topic,[m
+[32m+[m[32m              "options":normalized, "correct_answer":answer, "explanation":explanation})[m
+[32m+[m[32m    if not valid:[m
+[32m+[m[32m      return fallback, False[m
+[32m+[m[32m    for index, item in enumerate(valid):[m
+[32m+[m[32m      target=_ANSWER_CYCLE[index % len(_ANSWER_CYCLE)][m
+[32m+[m[32m      answer=item["correct_answer"][m
+[32m+[m[32m      item["options"][answer], item["options"][target]=item["options"][target], item["options"][answer][m
+[32m+[m[32m      item["correct_answer"]=target[m
+[32m+[m[32m    return valid[:5], True[m
+[1mdiff --git a/src/job_parser.py b/src/job_parser.py[m
+[1mindex 9f97493..542ded0 100644[m
+[1m--- a/src/job_parser.py[m
+[1m+++ b/src/job_parser.py[m
+[36m@@ -1,3 +1,4 @@[m
+[32m+[m[32mimport re[m
+ from src.resume_parser import pdf_to_text[m
+ from src.skill_extractor import extract_skills[m
+ [m
+[36m@@ -6,9 +7,14 @@[m [mdef parse_job_description(text: str) -> dict:[m
+     if not text:[m
+         raise ValueError("Please paste or upload a job description first.")[m
+     skills = extract_skills(text)[m
+[32m+[m[32m    sections=re.split(r"(?i)(?=\b(?:required|must(?:-have)?|preferred|nice\s+to\s+have|responsibilities|qualifications?)\b\s*[:\-]?)", text)[m
+[32m+[m[32m    preferred_text=" ".join(section for section in sections if re.match(r"(?i)^\s*(?:preferred|nice\s+to\s+have)\b", section))[m
+[32m+[m[32m    preferred_skills=extract_skills(preferred_text)["all"][m
+[32m+[m[32m    required_skills=[skill for skill in skills["all"] if skill not in set(preferred_skills)][m
+     lines = [x.strip("•- ") for x in text.splitlines() if x.strip()][m
+     required = [x for x in lines if any(k in x.lower() for k in ("required", "must", "responsibil", "qualification"))][m
+     preferred = [x for x in lines if any(k in x.lower() for k in ("preferred", "nice to have", "plus"))][m
+     education = [x for x in lines if any(k in x.lower() for k in ("degree", "b.tech", "bachelor", "master"))][m
+[31m-    return {"raw_text": text, "skills": skills, "required_skills": skills["all"], "required": required,[m
+[32m+[m[32m    return {"raw_text": text, "skills": skills, "required_skills": required_skills,[m
+[32m+[m[32m            "preferred_skills": preferred_skills, "required": required,[m
+             "preferred": preferred, "education_requirements": education, "keywords": skills["all"]}[m
+[1mdiff --git a/src/llm.py b/src/llm.py[m
+[1mindex 6728724..f3440bf 100644[m
+[1m--- a/src/llm.py[m
+[1m+++ b/src/llm.py[m
+[36m@@ -1,16 +1,33 @@[m
+ import os[m
+[32m+[m[32mimport logging[m
+ from dotenv import load_dotenv[m
+ load_dotenv()[m
+ [m
+[31m-def generate(prompt: str, fallback: str) -> tuple[str, bool]:[m
+[31m-    """Returns response and whether it came from a configured LLM."""[m
+[31m-    key = os.getenv("OPENAI_API_KEY")[m
+[31m-    if not key: return fallback, False[m
+[32m+[m[32mlogger = logging.getLogger(__name__)[m
+[32m+[m
+[32m+[m[32mdef generate(prompt: str, fallback: str, max_tokens: int = 600) -> tuple[str, bool]:[m
+[32m+[m[32m    """Returns a local Ollama response and whether generation succeeded."""[m
+[32m+[m[32m    if not prompt.strip():[m
+[32m+[m[32m        logger.warning("Skipped Ollama generation because the prompt was empty")[m
+[32m+[m[32m        return fallback, False[m
+     try:[m
+         from openai import OpenAI[m
+[31m-        client = OpenAI(api_key=key)[m
+[31m-        response = client.chat.completions.create(model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),[m
+[31m-            messages=[{"role": "system", "content": "Be accurate. Never invent resume facts."}, {"role": "user", "content": prompt}], temperature=0.3)[m
+[31m-        return response.choices[0].message.content, True[m
+[31m-    except Exception as exc:[m
+[31m-        return f"LLM request unavailable ({exc}).\n\n{fallback}", False[m
+[32m+[m[32m        client = OpenAI([m
+[32m+[m[32m            base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"),[m
+[32m+[m[32m            api_key="ollama",[m
+[32m+[m[32m            timeout=120,[m
+[32m+[m[32m        )[m
+[32m+[m[32m        response = client.chat.completions.create([m
+[32m+[m[32m            model=os.getenv("OLLAMA_MODEL", "qwen2.5:3b"),[m
+[32m+[m[32m            messages=[{"role": "system", "content": "Be accurate. Never invent resume facts."}, {"role": "user", "content": prompt}],[m
+[32m+[m[32m            temperature=0.3,[m
+[32m+[m[32m            max_tokens=max(1, max_tokens),[m
+[32m+[m[32m            extra_body={"keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m")},[m
+[32m+[m[32m        )[m
+[32m+[m[32m        content = response.choices[0].message.content[m
+[32m+[m[32m        if content and content.strip():[m
+[32m+[m[32m            return content.strip(), True[m
+[32m+[m[32m        logger.warning("Ollama returned an empty response")[m
+[32m+[m[32m    except Exception:[m
+[32m+[m[32m        logger.exception("Ollama generation failed")[m
+[32m+[m[32m    return fallback, False[m
+[1mdiff --git a/src/prompts.py b/src/prompts.py[m
+[1mindex c98089f..94f2d02 100644[m
+[1m--- a/src/prompts.py[m
+[1m+++ b/src/prompts.py[m
+[36m@@ -1,19 +1,56 @@[m
+[32m+[m[32mimport re[m
+[32m+[m
+ def resume_improvement_prompt(resume, job):[m
+[31m-    return f"Using only the following resume facts, suggest ATS-safe improvements for this job. Clearly label recommendations. Resume: {resume['raw_text']}\nJob: {job['raw_text']}"[m
+[32m+[m[32m    return f"""Act as a careful resume coach. Use only facts explicitly supported by the candidate's resume; never invent skills, employers, dates, metrics, or outcomes. Tailor advice to the target job and separate verified edits from skills the candidate should learn.[m
+[32m+[m[32mReturn concise Markdown sections for: summary/content edits, ATS keywords already supported by evidence, project and experience bullet improvements, job-alignment gaps, and truthful next steps. When suggesting a rewritten bullet, use placeholders for missing metrics rather than making them up.[m
+[32m+[m[32mResume: {resume.get('raw_text', '')}[m
+[32m+[m[32mDetected resume skills: {', '.join(resume.get('technical_skills', []))}[m
+[32m+[m[32mTarget job: {job.get('raw_text', '')}[m
+[32m+[m[32mJob skills: {', '.join(job.get('required_skills', []))}"""[m
+ [m
+ def interview_prompt(resume, job, missing):[m
+[31m-    return f"Create concise technical, HR, project and behavioral interview questions with answer guidance for this role. Resume: {resume['raw_text']} Job: {job['raw_text']} Missing skills: {', '.join(missing)}"[m
+[32m+[m[32m    return f"""Create a concise interview set tailored to this candidate's actual resume and target job. Include technical questions only for skills evidenced by the resume or explicitly required by the job, plus questions about the candidate's actual projects and experience. Include a short answer approach for each question; do not invent candidate achievements.[m
+[32m+[m[32mResume: {resume.get('raw_text', '')}[m
+[32m+[m[32mResume skills: {', '.join(resume.get('technical_skills', []))}[m
+[32m+[m[32mTarget job: {job.get('raw_text', '')}[m
+[32m+[m[32mMissing job skills (learning topics, not existing skills): {', '.join(missing)}"""[m
+[32m+[m
+[32m+[m[32mdef mock_interview_prompt(resume, job):[m
+[32m+[m[32m    return f"""Create five unique resume-based interview multiple-choice questions as valid JSON only, with no Markdown fences. Use this exact shape: {{"questions":[{{"question":"...","topic":"...","options":{{"A":"...","B":"...","C":"...","D":"..."}},"correct_answer":"A","explanation":"..."}}]}}.[m
+[32m+[m[32mEach question must be based on a skill, project, education, or experience explicitly present in the resume. Use job skills only when they are explicitly required by the target job. Give exactly four distinct options and exactly one correct answer letter (A-D), with a brief factual explanation. Vary correct-answer letters. Avoid duplicate questions and unsupported candidate claims.[m
+[32m+[m[32mResume: {resume.get('raw_text', '')}[m
+[32m+[m[32mResume skills: {', '.join(resume.get('technical_skills', []))}[m
+[32m+[m[32mProjects: {resume.get('projects', '')}[m
+[32m+[m[32mExperience: {resume.get('experience', '')}\nInternships: {resume.get('internships', '')}[m
+[32m+[m[32mRequired target-job skills: {', '.join(job.get('required_skills', [])) or 'none detected'}[m
+[32m+[m[32mAllowed technical topics: {', '.join(dict.fromkeys(resume.get('technical_skills', []) + job.get('required_skills', []))) or 'resume projects and experience only'}[m
+[32m+[m[32mDo not ask about preferred skills unless they are also listed in the resume. Target job: {job.get('raw_text', '')}"""[m
+ [m
+ def career_blueprint_prompt(resume, job, match, controls):[m
+[31m-    return f"""You are a precise career coach. Create a {controls['depth']} personalized career blueprint for a student targeting {controls['role']}.[m
+[31m-Tone: {controls['tone']}. Prioritize: {controls['priority']}.[m
+[31m-Use ONLY supported facts from the resume. Treat missing skills as learning goals, never existing skills. Use crisp markdown headings:[m
+[31m-1. Career positioning (2 sentences)[m
+[31m-2. Resume headline and ATS keywords supported by evidence[m
+[31m-3. {controls['weeks']}-week action sprint, including a practice project[m
+[31m-4. Three interview stories to prepare using STAR[m
+[31m-5. One next action for today[m
+[32m+[m[32m    return f"""You are a concise career coach. Create a practical {controls['depth']} blueprint for a student targeting {controls['role']}. Tone: {controls['tone']}; priority: {controls['priority']}.[m
+[32m+[m[32mUse ONLY supported resume facts. Never present a missing skill as an existing skill or invent results, metrics, or experience. Keep the entire response under 200 words and use exactly these five Markdown headings:[m
+[32m+[m[32m1. Career positioning: one sentence.[m
+[32m+[m[32m2. Resume headline and ATS keywords: one headline plus four supported keywords.[m
+[32m+[m[32m3. {controls['weeks']}-week action sprint: four short milestones spanning the sprint; include one practice project.[m
+[32m+[m[32m4. Interview stories: three brief STAR story prompts grounded in the resume.[m
+[32m+[m[32m5. Today: one concrete action that takes under an hour.[m
+[32m+[m[32mPrefer short bullets, no introduction or conclusion.[m
+ Resume: {resume['raw_text']}[m
+ Job description: {job['raw_text']}[m
+[31m-Matching skills: {', '.join(match['matching']) or 'none'}[m
+[31m-Missing skills: {', '.join(match['missing']) or 'none'}"""[m
+[32m+[m[32mResume-verified skills (may appear as current strengths): {', '.join(resume.get('technical_skills', [])) or 'none detected'}[m
+[32m+[m[32mVerified job matches: {', '.join(match['matching']) or 'none'}[m
+[32m+[m[32mJob skills missing from the resume (learning goals only; never list as current skills or past experience): {', '.join(match['missing']) or 'none'}[m
+[32m+[m[32mDo not use a job requirement as evidence that the student already has that skill. Interview story prompts may refer only to resume-listed projects, education, experience, or verified skills."""[m
+[32m+[m
+[32m+[m[32mdef enforce_blueprint_resume_keywords(output, role, resume):[m
+[32m+[m[32m    lines=output.splitlines()[m
+[32m+[m[32m    start=next((index for index,line in enumerate(lines) if re.match(r"\s*2[.)]\s*Resume headline and ATS keywords\b", line, re.IGNORECASE)), None)[m
+[32m+[m[32m    if start is None:[m
+[32m+[m[32m        return output[m
+[32m+[m[32m    end=next((index for index in range(start+1, len(lines)) if re.match(r"\s*3[.)]\s*", lines[index])), len(lines))[m
+[32m+[m[32m    supported=resume.get("technical_skills", [])[m
+[32m+[m[32m    headline=f"{role} candidate with resume evidence in {', '.join(supported)}." if supported else f"{role} candidate with evidence from the listed projects and education."[m
+[32m+[m[32m    keywords=", ".join(supported) if supported else "Use only keywords explicitly supported by the resume."[m
+[32m+[m[32m    replacement=["2. Resume headline and ATS keywords:", f"- Headline: {headline}", f"- Supported keywords: {keywords}"][m
+[32m+[m[32m    lines[start:end]=replacement[m
+[32m+[m[32m    return "\n".join(lines)[m
+[1mdiff --git a/src/rag.py b/src/rag.py[m
+[1mindex 02207f9..7cd9287 100644[m
+[1m--- a/src/rag.py[m
+[1m+++ b/src/rag.py[m
+[36m@@ -3,10 +3,45 @@[m [mfrom src.embeddings import semantic_similarity[m
+ [m
+ def load_knowledge(base="data/knowledge_base"):[m
+     docs=[][m
+[31m-    for p in Path(base).glob("*.txt"):[m
+[31m-        docs.append({"source":p.name,"text":p.read_text(encoding="utf-8")})[m
+[32m+[m[32m    folder=Path(base)[m
+[32m+[m[32m    if not folder.exists():[m
+[32m+[m[32m        return docs[m
+[32m+[m[32m    for path in sorted(folder.glob("*.txt")):[m
+[32m+[m[32m        text=path.read_text(encoding="utf-8", errors="replace").strip()[m
+[32m+[m[32m        if text:[m
+[32m+[m[32m            docs.append({"source":path.name,"text":text})[m
+     return docs[m
+ [m
+[31m-def retrieve(query, limit=3):[m
+[31m-    ranked=sorted(({**d,"score":semantic_similarity(query,d["text"])} for d in load_knowledge()), key=lambda d:d["score"], reverse=True)[m
+[31m-    return ranked[:limit][m
+[32m+[m[32mdef chunk_documents(documents, chunk_size=1000, overlap=120):[m
+[32m+[m[32m    chunks=[][m
+[32m+[m[32m    for document in documents:[m
+[32m+[m[32m        text=" ".join(str(document.get("text", "")).split())[m
+[32m+[m[32m        source=document.get("source", "document")[m
+[32m+[m[32m        start=0[m
+[32m+[m[32m        while start < len(text):[m
+[32m+[m[32m            end=min(start + chunk_size, len(text))[m
+[32m+[m[32m            if end < len(text):[m
+[32m+[m[32m                boundary=text.rfind(" ", start + chunk_size // 2, end)[m
+[32m+[m[32m                if boundary > start:[m
+[32m+[m[32m                    end=boundary[m
+[32m+[m[32m            chunk=text[start:end].strip()[m
+[32m+[m[32m            if chunk:[m
+[32m+[m[32m                chunks.append({"source":source, "text":chunk, "chunk":len(chunks)})[m
+[32m+[m[32m            if end >= len(text):[m
+[32m+[m[32m                break[m
+[32m+[m[32m            start=max(start + 1, end - overlap)[m
+[32m+[m[32m    return chunks[m
+[32m+[m
+[32m+[m[32mdef retrieve(query, limit=3, documents=None, base="data/knowledge_base", min_score=0.05):[m
+[32m+[m[32m    query=(query or "").strip()[m
+[32m+[m[32m    if not query or limit <= 0:[m
+[32m+[m[32m        return [][m
+[32m+[m[32m    docs=load_knowledge(base)[m
+[32m+[m[32m    if documents:[m
+[32m+[m[32m        docs.extend(documents)[m
+[32m+[m[32m    ranked=[][m
+[32m+[m[32m    for chunk in chunk_documents(docs):[m
+[32m+[m[32m        score=semantic_similarity(query, chunk["text"])[m
+[32m+[m[32m        if score >= min_score:[m
+[32m+[m[32m            ranked.append({**chunk, "score":score})[m
+[32m+[m[32m    return sorted(ranked, key=lambda item:item["score"], reverse=True)[:limit][m
+[1mdiff --git a/tests/test_basic.py b/tests/test_basic.py[m
+[1mindex 2eb4570..cce7f7f 100644[m
+[1m--- a/tests/test_basic.py[m
+[1m+++ b/tests/test_basic.py[m
+[36m@@ -1,6 +1,20 @@[m
+[32m+[m[32mimport json[m
+[32m+[m[32mimport os[m
+[32m+[m[32mimport sys[m
+[32m+[m[32mimport types[m
+[32m+[m[32mimport unittest[m
+[32m+[m[32mfrom pathlib import Path[m
+[32m+[m[32mfrom unittest.mock import Mock, patch[m
+[32m+[m
+ from src.resume_parser import parse_resume[m
+ from src.job_parser import parse_job_description[m
+ from src.similarity import analyze_match[m
+[32m+[m[32mfrom src.embeddings import semantic_similarity[m
+[32m+[m[32mfrom src.evaluation import prompt_comparison[m
+[32m+[m[32mfrom src.interview import fallback_mcqs, parse_mcqs[m
+[32m+[m[32mfrom src.rag import retrieve[m
+[32m+[m[32mfrom src.prompts import enforce_blueprint_resume_keywords[m
+[32m+[m[32mfrom src import llm[m
+ [m
+ def test_matching_runs():[m
+     resume=parse_resume("Asha\nSkills: Python, SQL, Pandas, Git\nProject: data dashboard")[m
+[36m@@ -8,3 +22,210 @@[m [mdef test_matching_runs():[m
+     result=analyze_match(resume, job)[m
+     assert 0 <= result["score"] <= 100[m
+     assert "python" in result["matching"][m
+[32m+[m
+[32m+[m[32mclass CareerAssistantServiceTests(unittest.TestCase):[m
+[32m+[m[32m    def setUp(self):[m
+[32m+[m[32m        self.resume = parse_resume("""Asha Example[m
+[32m+[m[32mSkills: Python, SQL, Pandas[m
+[32m+[m[32mEducation[m
+[32m+[m[32mBSc Data Science[m
+[32m+[m[32mExperience[m
+[32m+[m[32mAnalyst intern at Acme[m
+[32m+[m[32mProjects[m
+[32m+[m[32mSales dashboard using Python, SQL, and Pandas""")[m
+[32m+[m[32m        self.job = parse_job_description("Required: Python, SQL, Pandas, Excel")[m
+[32m+[m
+[32m+[m[32m    def test_matching_handles_resume_and_job(self):[m
+[32m+[m[32m        result = analyze_match(self.resume, self.job)[m
+[32m+[m[32m        self.assertIn("python", result["matching"])[m
+[32m+[m[32m        self.assertGreaterEqual(result["score"], 0)[m
+[32m+[m
+[32m+[m[32m    def test_preferred_job_skills_are_not_marked_as_required(self):[m
+[32m+[m[32m        job = parse_job_description("Required: Python and SQL. Preferred: Power BI and Tableau.")[m
+[32m+[m[32m        self.assertEqual(set(job["required_skills"]), {"python", "sql"})[m
+[32m+[m[32m        self.assertEqual(set(job["preferred_skills"]), {"power bi", "tableau"})[m
+[32m+[m
+[32m+[m[32m    def test_generate_uses_configured_local_ollama(self):[m
+[32m+[m[32m        response = types.SimpleNamespace(choices=[types.SimpleNamespace(message=types.SimpleNamespace(content="Local answer"))])[m
+[32m+[m[32m        client = Mock()[m
+[32m+[m[32m        client.chat.completions.create.return_value = response[m
+[32m+[m[32m        openai = Mock(return_value=client)[m
+[32m+[m[32m        with patch.dict(sys.modules, {"openai": types.SimpleNamespace(OpenAI=openai)}), patch.dict(os.environ, {"OLLAMA_MODEL": "qwen2.5:3b"}):[m
+[32m+[m[32m            answer, live = llm.generate("Use the profile", "offline fallback")[m
+[32m+[m[32m        self.assertEqual((answer, live), ("Local answer", True))[m
+[32m+[m[32m        self.assertEqual(openai.call_args.kwargs["base_url"], "http://localhost:11434/v1")[m
+[32m+[m[32m        self.assertEqual(client.chat.completions.create.call_args.kwargs["model"], "qwen2.5:3b")[m
+[32m+[m[32m        self.assertEqual(client.chat.completions.create.call_args.kwargs["max_tokens"], 600)[m
+[32m+[m[32m        self.assertEqual(client.chat.completions.create.call_args.kwargs["extra_body"]["keep_alive"], "30m")[m
+[32m+[m
+[32m+[m[32m    def test_generate_returns_fallback_on_api_failure(self):[m
+[32m+[m[32m        openai = Mock(side_effect=ConnectionError("offline"))[m
+[32m+[m[32m        with patch.dict(sys.modules, {"openai": types.SimpleNamespace(OpenAI=openai)}):[m
+[32m+[m[32m            answer, live = llm.generate("Use the profile", "offline fallback")[m
+[32m+[m[32m        self.assertEqual(answer, "offline fallback")[m
+[32m+[m[32m        self.assertFalse(live)[m
+[32m+[m
+[32m+[m[32m    def test_rag_retrieves_resume_and_knowledge_sources(self):[m
+[32m+[m[32m        results = retrieve("Python SQL sales dashboard", documents=[{"source": "resume.txt", "text": self.resume["raw_text"]}], min_score=0.01)[m
+[32m+[m[32m        self.assertIn("resume.txt", {result["source"] for result in results})[m
+[32m+[m[32m        self.assertEqual(retrieve("", documents=[]), [])[m
+[32m+[m
+[32m+[m[32m    def test_fallback_mcqs_use_resume_skills_and_have_four_options(self):[m
+[32m+[m[32m        questions = fallback_mcqs(self.resume, self.job)[m
+[32m+[m[32m        self.assertEqual(len(questions), 5)[m
+[32m+[m[32m        self.assertIn("python", {question["topic"] for question in questions})[m
+[32m+[m[32m        for question in questions:[m
+[32m+[m[32m            self.assertEqual(set(question["options"]), {"A", "B", "C", "D"})[m
+[32m+[m[32m            self.assertIn(question["correct_answer"], question["options"])[m
+[32m+[m[32m            self.assertTrue(question["explanation"])[m
+[32m+[m
+[32m+[m[32m    def test_mcq_parser_rejects_malformed_and_varies_correct_answers(self):[m
+[32m+[m[32m        fallback = fallback_mcqs(self.resume, self.job)[m
+[32m+[m[32m        malformed, valid = parse_mcqs("not json", fallback)[m
+[32m+[m[32m        self.assertFalse(valid)[m
+[32m+[m[32m        self.assertEqual(malformed, fallback)[m
+[32m+[m[32m        payload = {"questions": [{"question": f"Question {index}?", "topic": "SQL",[m
+[32m+[m[32m            "options": {"A": "Correct", "B": "Option B", "C": "Option C", "D": "Option D"},[m
+[32m+[m[32m            "correct_answer": "A", "explanation": "A verified explanation."} for index in range(4)]}[m
+[32m+[m[32m        questions, valid = parse_mcqs(json.dumps(payload), fallback)[m
+[32m+[m[32m        self.assertTrue(valid)[m
+[32m+[m[32m        self.assertEqual(len({question["correct_answer"] for question in questions}), 4)[m
+[32m+[m[32m        off_profile = {"questions": [{"question": "How does React render components?", "topic": "React",[m
+[32m+[m[32m            "options": {"A": "Correct", "B": "Option B", "C": "Option C", "D": "Option D"},[m
+[32m+[m[32m            "correct_answer": "A", "explanation": "An explanation."}]}[m
+[32m+[m[32m        rejected, valid = parse_mcqs(json.dumps(off_profile), fallback, ["python", "sql", "project"])[m
+[32m+[m[32m        self.assertFalse(valid)[m
+[32m+[m[32m        self.assertEqual(rejected, fallback)[m
+[32m+[m
+[32m+[m[32m    def test_empty_tfidf_similarity_does_not_raise(self):[m
+[32m+[m[32m        with patch("src.embeddings._model", return_value=None):[m
+[32m+[m[32m            self.assertEqual(semantic_similarity("!!!", "???"), 0.0)[m
+[32m+[m
+[32m+[m[32m    def test_prompt_scores_depend_on_actual_output(self):[m
+[32m+[m[32m        table = prompt_comparison("Python SQL dashboard project", "Weather forecast tomorrow", "Python SQL dashboard", self.resume["raw_text"])[m
+[32m+[m[32m        self.assertEqual(len(table), 2)[m
+[32m+[m[32m        self.assertNotEqual(table.iloc[0]["Overall score"], table.iloc[1]["Overall score"])[m
+[32m+[m
+[32m+[m[32m    def test_blueprint_headline_uses_only_resume_skills(self):[m
+[32m+[m[32m        output = "1. Career positioning: Asha is a candidate.\n2. Resume headline and ATS keywords: Python, Excel Proficiency\n- Excel\n3. 4-week action sprint:\n- Learn Excel."[m
+[32m+[m[32m        clean = enforce_blueprint_resume_keywords(output, "Data Analyst", self.resume)[m
+[32m+[m[32m        section = clean.split("3. 4-week action sprint:", 1)[0][m
+[32m+[m[32m        self.assertIn("python", section.lower())[m
+[32m+[m[32m        self.assertNotIn("excel", section.lower())[m
+[32m+[m[32m        self.assertIn("Learn Excel", clean)[m
+[32m+[m
+[32m+[m[32m    def test_generation_pages_persist_and_render_model_output(self):[m
+[32m+[m[32m        from streamlit.testing.v1 import AppTest[m
+[32m+[m
+[32m+[m[32m        cases = [[m
+[32m+[m[32m            ("Career Studio ✨", "✳  Generate my career blueprint", "blueprint"),[m
+[32m+[m[32m            ("Resume Improvement", "Generate recommendations", "recommendations"),[m
+[32m+[m[32m            ("Interview Preparation", "Create interview set", "interview_set"),[m
+[32m+[m[32m            ("Prompt Evaluation", "Compare prompts", "prompt_evaluation"),[m
+[32m+[m[32m        ][m
+[32m+[m[32m        with patch("src.llm.generate", return_value=("Generated from the supplied candidate profile.", True)):[m
+[32m+[m[32m            for page, button_label, result_key in cases:[m
+[32m+[m[32m                app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "app.py"))[m
+[32m+[m[32m                app.session_state["resume"] = self.resume[m
+[32m+[m[32m                app.session_state["job"] = self.job[m
+[32m+[m[32m                app.session_state["page"] = page[m
+[32m+[m[32m                app.run(timeout=60)[m
+[32m+[m[32m                next(button for button in app.button if button.label == button_label).click().run(timeout=60)[m
+[32m+[m[32m                self.assertIn(result_key, app.session_state, page)[m
+[32m+[m[32m                self.assertTrue(any("Generated from the supplied candidate profile." in element.value for element in app.markdown), page)[m
+[32m+[m[32m                self.assertFalse(app.exception, page)[m
+[32m+[m
+[32m+[m[32m    def test_resume_sections_expand_and_keep_content_visible(self):[m
+[32m+[m[32m        from streamlit.testing.v1 import AppTest[m
+[32m+[m
+[32m+[m[32m        app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "app.py"))[m
+[32m+[m[32m        app.session_state["resume"] = self.resume[m
+[32m+[m[32m        app.session_state["job"] = self.job[m
+[32m+[m[32m        app.session_state["page"] = "Resume Analysis"[m
+[32m+[m[32m        app.run(timeout=60)[m
+[32m+[m[32m        labels = {item.label for item in app.expander}[m
+[32m+[m[32m        self.assertTrue({"Education", "Experience", "Projects"}.issubset(labels))[m
+[32m+[m[32m        section_content = {item.label: " ".join(str(child.value) for child in item.children.values()) for item in app.expander}[m
+[32m+[m[32m        self.assertIn("BSc Data Science", section_content["Education"])[m
+[32m+[m[32m        self.assertIn("Analyst intern at Acme", section_content["Experience"])[m
+[32m+[m[32m        self.assertIn("Sales dashboard", section_content["Projects"])[m
+[32m+[m[32m        self.assertFalse(app.exception)[m
+[32m+[m
+[32m+[m[32m    def test_job_matching_warning_uses_scoped_dark_text_style(self):[m
+[32m+[m[32m        from streamlit.testing.v1 import AppTest[m
+[32m+[m
+[32m+[m[32m        app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "app.py"))[m
+[32m+[m[32m        app.session_state["resume"] = self.resume[m
+[32m+[m[32m        app.session_state["job"] = self.job[m
+[32m+[m[32m        app.session_state["page"] = "Job Matching"[m
+[32m+[m[32m        app.run(timeout=60)[m
+[32m+[m[32m        self.assertTrue(any("match-warning" in str(item.value) and "Potential missing requirements" in str(item.value) for item in app.markdown))[m
+[32m+[m[32m        self.assertFalse(app.exception)[m
+[32m+[m
+[32m+[m[32m    def test_rag_form_passes_resume_context_and_persists_answer(self):[m
+[32m+[m[32m        from streamlit.testing.v1 import AppTest[m
+[32m+[m
+[32m+[m[32m        app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "app.py"))[m
+[32m+[m[32m        app.session_state["resume"] = self.resume[m
+[32m+[m[32m        app.session_state["job"] = self.job[m
+[32m+[m[32m        app.session_state["page"] = "RAG Assistant"[m
+[32m+[m[32m        with patch("src.llm.generate", return_value=("Your resume lists Python and SQL.", True)) as generate:[m
+[32m+[m[32m            app.run(timeout=60)[m
+[32m+[m[32m            app.text_input[0].set_value("Which skills are on my resume?").run(timeout=60)[m
+[32m+[m[32m            next(button for button in app.button if button.label == "Ask Career Foundry").click().run(timeout=60)[m
+[32m+[m[32m        self.assertIn("Source: Your resume", generate.call_args.args[0])[m
+[32m+[m[32m        self.assertIn("Python", generate.call_args.args[0])[m
+[32m+[m[32m        self.assertEqual(app.session_state["rag_history"][-1]["answer"], "Your resume lists Python and SQL.")[m
+[32m+[m[32m        self.assertFalse(app.exception)[m
+[32m+[m
+[32m+[m[32m    def test_rag_empty_retrieval_does_not_call_model(self):[m
+[32m+[m[32m        from streamlit.testing.v1 import AppTest[m
+[32m+[m
+[32m+[m[32m        app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "app.py"))[m
+[32m+[m[32m        app.session_state["resume"] = self.resume[m
+[32m+[m[32m        app.session_state["job"] = self.job[m
+[32m+[m[32m        app.session_state["page"] = "RAG Assistant"[m
+[32m+[m[32m        with patch("src.rag.retrieve", return_value=[]), patch("src.llm.generate") as generate:[m
+[32m+[m[32m            app.run(timeout=60)[m
+[32m+[m[32m            app.text_input[0].set_value("Find a nonexistent detail").run(timeout=60)[m
+[32m+[m[32m            next(button for button in app.button if button.label == "Ask Career Foundry").click().run(timeout=60)[m
+[32m+[m[32m        self.assertFalse(generate.called)[m
+[32m+[m[32m        self.assertIn("couldn't find relevant information", app.session_state["rag_history"][-1]["answer"])[m
+[32m+[m[32m        self.assertFalse(app.exception)[m
+[32m+[m
+[32m+[m[32m    def test_mock_interview_generates_submits_and_grades_mcq(self):[m
+[32m+[m[32m        from streamlit.testing.v1 import AppTest[m
+[32m+[m
+[32m+[m[32m        app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "app.py"))[m
+[32m+[m[32m        app.session_state["resume"] = self.resume[m
+[32m+[m[32m        app.session_state["job"] = self.job[m
+[32m+[m[32m        app.session_state["page"] = "Mock Interview"[m
+[32m+[m[32m        with patch("src.llm.generate", side_effect=lambda prompt, fallback, **kwargs: (fallback, False)):[m
+[32m+[m[32m            app.run(timeout=60)[m
+[32m+[m[32m            next(button for button in app.button if button.label == "Generate resume-based question set").click().run(timeout=60)[m
+[32m+[m[32m            question = app.session_state["mock_questions"][0][m
+[32m+[m[32m            next(widget for widget in app.radio if widget.label == "Choose one answer").set_value(question["correct_answer"]).run(timeout=60)[m
+[32m+[m[32m            next(button for button in app.button if button.label == "Submit answer").click().run(timeout=60)[m
+[32m+[m[32m        self.assertEqual(app.session_state["mock_answers"][0], question["correct_answer"])[m
+[32m+[m[32m        self.assertTrue(any("Correct answer" in item.value for item in app.success))[m
+[32m+[m[32m        self.assertTrue(any(item.value == question["explanation"] for item in app.info))[m
+[32m+[m[32m        self.assertFalse(app.exception)[m
+[32m+[m
+[32m+[m[32m    def test_mock_interview_completes_short_model_set_from_profile(self):[m
+[32m+[m[32m        from streamlit.testing.v1 import AppTest[m
+[32m+[m
+[32m+[m[32m        model_response = json.dumps({"questions": [{[m
+[32m+[m[32m            "question": "Which Python structure maps unique keys to values?", "topic": "Python",[m
+[32m+[m[32m            "options": {"A": "List", "B": "Dictionary", "C": "Tuple", "D": "Set"},[m
+[32m+[m[32m            "correct_answer": "B", "explanation": "A dictionary stores values under unique keys."}]})[m
+[32m+[m[32m        app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "app.py"))[m
+[32m+[m[32m        app.session_state["resume"] = self.resume[m
+[32m+[m[32m        app.session_state["job"] = self.job[m
+[32m+[m[32m        app.session_state["page"] = "Mock Interview"[m
+[32m+[m[32m        with patch("src.llm.generate", return_value=(model_response, True)):[m
+[32m+[m[32m            app.run(timeout=60)[m
+[32m+[m[32m            next(button for button in app.button if button.label == "Generate resume-based question set").click().run(timeout=60)[m
+[32m+[m[32m        questions = app.session_state["mock_questions"][m
+[32m+[m[32m        self.assertEqual(len(questions), 5)[m
+[32m+[m[32m        self.assertTrue(app.session_state["mock_questions_mixed"])[m
+[32m+[m[32m        self.assertFalse(app.exception)[m

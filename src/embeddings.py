@@ -15,7 +15,13 @@ def semantic_similarity(first: str, second: str) -> float:
     if not first.strip() or not second.strip(): return 0.0
     model = _model()
     if model:
-        vectors = model.encode([first, second])
-        return float(cosine_similarity([vectors[0]], [vectors[1]])[0][0])
-    matrix = TfidfVectorizer(stop_words="english").fit_transform([first, second])
+        try:
+            vectors = model.encode([first, second])
+            return float(cosine_similarity([vectors[0]], [vectors[1]])[0][0])
+        except Exception:
+            pass
+    try:
+        matrix = TfidfVectorizer(stop_words="english").fit_transform([first, second])
+    except ValueError:
+        return 0.0
     return float(cosine_similarity(matrix[0], matrix[1])[0][0])

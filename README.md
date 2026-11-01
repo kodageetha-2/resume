@@ -1,6 +1,6 @@
 # AI-Powered Generative Career Assistant
 
-A modular Streamlit academic project for resume–job matching, skill gaps, RAG career guidance and placement preparation. It uses sentence-transformer embeddings when available, with a TF-IDF fallback, and optional OpenAI-compatible LLM recommendations.
+A modular Streamlit academic project for resume–job matching, skill gaps, RAG career guidance and placement preparation. It uses sentence-transformer embeddings when available, with a TF-IDF fallback, and runs the open-weight Qwen 2.5 3B model locally through Ollama for generated recommendations.
 
 ## Install and run
 
@@ -9,10 +9,11 @@ python -m venv .venv
 .venv\\Scripts\\activate
 pip install -r requirements.txt
 copy .env.example .env
+ollama pull qwen2.5:3b
 streamlit run app.py
 ```
 
-Add `OPENAI_API_KEY` and optionally `OPENAI_MODEL` to `.env`; never commit `.env`. The application remains usable without a key through deterministic offline guidance.
+Install Ollama before running the app, then download the model with `ollama pull qwen2.5:3b`. Ollama must be running locally; the app connects to its OpenAI-compatible endpoint at `http://localhost:11434/v1`. Set `OLLAMA_MODEL` or `OLLAMA_BASE_URL` in `.env` to use a different local model or endpoint. `OLLAMA_KEEP_ALIVE` controls how long Ollama keeps the model loaded after each request (default `30m`, using about 2.2 GB for Qwen 2.5 3B on this machine). If Ollama is unavailable, the application remains usable with deterministic offline guidance.
 
 ## Test
 
