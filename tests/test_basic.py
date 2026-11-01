@@ -54,6 +54,7 @@ Sales dashboard using Python, SQL, and Pandas""")
             answer, live = llm.generate("Use the profile", "offline fallback")
         self.assertEqual((answer, live), ("Local answer", True))
         self.assertEqual(openai.call_args.kwargs["base_url"], "http://localhost:11434/v1")
+        self.assertEqual(openai.call_args.kwargs["timeout"], 15)
         self.assertEqual(client.chat.completions.create.call_args.kwargs["model"], "qwen2.5:3b")
         self.assertEqual(client.chat.completions.create.call_args.kwargs["max_tokens"], 600)
         self.assertEqual(client.chat.completions.create.call_args.kwargs["extra_body"]["keep_alive"], "30m")
@@ -100,6 +101,19 @@ Sales dashboard using Python, SQL, and Pandas""")
     def test_empty_tfidf_similarity_does_not_raise(self):
         with patch("src.embeddings._model", return_value=None):
             self.assertEqual(semantic_similarity("!!!", "???"), 0.0)
+
+    def test_semantic_similarity_caches_repeated_inputs(self):
+        model = Mock()
+        model.encode.return_value = [[1.0, 0.0], [1.0, 0.0]]
+        semantic_similarity.cache_clear()
+        try:
+            with patch("src.embeddings._model", return_value=model):
+                first = semantic_similarity("resume evidence", "job requirements")
+                second = semantic_similarity("resume evidence", "job requirements")
+            self.assertEqual(first, second)
+            model.encode.assert_called_once()
+        finally:
+            semantic_similarity.cache_clear()
 
     def test_prompt_scores_depend_on_actual_output(self):
         table = prompt_comparison("Python SQL dashboard project", "Weather forecast tomorrow", "Python SQL dashboard", self.resume["raw_text"])

@@ -15,7 +15,7 @@ def generate(prompt: str, fallback: str, max_tokens: int = 600) -> tuple[str, bo
         client = OpenAI(
             base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
             api_key="ollama",
-            timeout=120,
+            timeout=15,
         )
         response = client.chat.completions.create(
             model=os.getenv("OLLAMA_MODEL", "qwen2.5:3b"),

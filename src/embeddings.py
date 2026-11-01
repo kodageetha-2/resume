@@ -1,4 +1,6 @@
 from functools import lru_cache
+from functools import lru_cache
+
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -11,6 +13,7 @@ def _model():
     except Exception:
         return None
 
+@lru_cache(maxsize=256)
 def semantic_similarity(first: str, second: str) -> float:
     if not first.strip() or not second.strip(): return 0.0
     model = _model()

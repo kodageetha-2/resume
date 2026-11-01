@@ -160,15 +160,15 @@ with st.sidebar:
                 "tone": st.selectbox("Coach voice", ["supportive", "direct", "professional"], key="studio_tone"),
             }
         st.divider()
-        st.caption("LOCAL INFERENCE · OLLAMA")
-        st.caption("Qwen 2.5 3B · runs on this machine")
+        st.caption("AI CAREER GUIDANCE")
+        st.caption("On-device model · Qwen 2.5 3B")
         st.button("＋  Start a new analysis", use_container_width=True, on_click=reset_workspace)
     else:
         page="Home"
         st.caption("Add your resume and a target job to open your workspace.")
         st.divider()
-        st.caption("LOCAL INFERENCE · OLLAMA")
-        st.caption("Qwen 2.5 3B · runs on this machine")
+        st.caption("AI CAREER GUIDANCE")
+        st.caption("On-device model · Qwen 2.5 3B")
 st.markdown("<div class='masthead'><div class='masthead-word'>CAREER FOUNDRY</div><div class='masthead-meta'>Evidence in · next move out</div></div>", unsafe_allow_html=True)
 
 if page == "Home":
