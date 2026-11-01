@@ -144,11 +144,11 @@ if "page" not in st.session_state:
 controls={"role":"Data Analyst", "priority":"Skill building", "weeks":4, "depth":"practical", "tone":"supportive"}
 with st.sidebar:
     st.markdown("<div class='brand'><div class='brand-icon'>✳</div><div><div class='brand-name'>CAREER<br>FOUNDRY</div><div class='brand-sub'>LOCAL CAREER LAB</div></div></div>", unsafe_allow_html=True)
+    st.caption("WORKSPACE")
+    current_page=st.session_state.page if st.session_state.page in nav_pages else "Home"
+    page=st.radio("Workspace", nav_pages, index=nav_pages.index(current_page), key="workspace_page", label_visibility="collapsed")
+    st.session_state.page=page
     if ready():
-        st.caption("WORKSPACE")
-        current_page=st.session_state.page if st.session_state.page in nav_pages else "Career Studio ✨"
-        page=st.radio("Workspace", nav_pages, index=nav_pages.index(current_page), key="workspace_page", label_visibility="collapsed")
-        st.session_state.page=page
         if page == "Career Studio ✨":
             st.divider()
             st.caption("PLAN SETTINGS")
@@ -164,7 +164,6 @@ with st.sidebar:
         st.caption("On-device model · Qwen 2.5 3B")
         st.button("＋  Start a new analysis", use_container_width=True, on_click=reset_workspace)
     else:
-        page="Home"
         st.caption("Add your resume and a target job to open your workspace.")
         st.divider()
         st.caption("AI CAREER GUIDANCE")

@@ -165,6 +165,21 @@ Sales dashboard using Python, SQL, and Pandas""")
         self.assertIn("Sales dashboard", section_content["Projects"])
         self.assertFalse(app.exception)
 
+    def test_sidebar_navigation_is_available_before_documents_are_loaded(self):
+        from streamlit.testing.v1 import AppTest
+
+        app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "app.py"))
+        app.run(timeout=60)
+        workspace = next(widget for widget in app.radio if widget.label == "Workspace")
+        self.assertEqual(list(workspace.options), [
+            "Home", "Career Studio ✨", "Resume Analysis", "Job Matching", "Skill Gap",
+            "Resume Improvement", "Career Roadmap", "Interview Preparation", "Mock Interview",
+            "RAG Assistant", "Prompt Evaluation",
+        ])
+        workspace.set_value("Job Matching").run(timeout=60)
+        self.assertTrue(any("First add a resume and job description" in item.value for item in app.info))
+        self.assertFalse(app.exception)
+
     def test_job_matching_warning_uses_scoped_dark_text_style(self):
         from streamlit.testing.v1 import AppTest
 
